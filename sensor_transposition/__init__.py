@@ -8,6 +8,7 @@ from sensor_transposition.sensor_collection import GpsParameters, ImuParameters,
 from sensor_transposition.transform import Transform
 from sensor_transposition import camera_intrinsics
 from sensor_transposition import lidar
+from sensor_transposition import lidar_camera
 from sensor_transposition import gps
 from sensor_transposition import imu
 from sensor_transposition import radar
@@ -22,6 +23,7 @@ __all__ = [
     "Transform",
     "camera_intrinsics",
     "lidar",
+    "lidar_camera",
     "gps",
     "imu",
     "radar",
