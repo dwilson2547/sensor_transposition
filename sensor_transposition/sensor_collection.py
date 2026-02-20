@@ -375,6 +375,88 @@ class SensorCollection:
         return np.linalg.inv(T_tgt) @ T_src
 
     # ------------------------------------------------------------------
+    # LiDAR-camera fusion
+    # ------------------------------------------------------------------
+
+    def project_lidar_to_image(
+        self,
+        lidar_name: str,
+        camera_name: str,
+        points: "np.ndarray",
+    ) -> "tuple[np.ndarray, np.ndarray]":
+        """Project LiDAR points onto the image plane of a camera sensor.
+
+        Looks up the extrinsic transform between *lidar_name* and *camera_name*
+        and the intrinsic matrix of *camera_name*, then delegates to
+        :func:`~sensor_transposition.lidar_camera.project_lidar_to_image`.
+
+        Args:
+            lidar_name: Name of the source LiDAR sensor in this collection.
+            camera_name: Name of the target camera sensor in this collection.
+                The sensor must have ``intrinsics`` set.
+            points: ``(N, 3)`` float array of 3-D points in the LiDAR frame.
+
+        Returns:
+            pixel_coords: ``(N, 2)`` float array of ``(u, v)`` pixel coordinates.
+            valid_mask: ``(N,)`` boolean array; ``True`` for points that project
+                onto the image.
+
+        Raises:
+            KeyError: If either sensor is not found.
+            ValueError: If the camera sensor has no intrinsics.
+        """
+        from sensor_transposition.lidar_camera import project_lidar_to_image as _project
+
+        camera = self.get_sensor(camera_name)
+        if camera.intrinsics is None:
+            raise ValueError(
+                f"Camera sensor '{camera_name}' has no intrinsics set."
+            )
+        T = self.transform_between(lidar_name, camera_name)
+        K = camera.intrinsics.camera_matrix
+        return _project(points, T, K, camera.intrinsics.width, camera.intrinsics.height)
+
+    def color_lidar_from_image(
+        self,
+        lidar_name: str,
+        camera_name: str,
+        points: "np.ndarray",
+        image: "np.ndarray",
+    ) -> "tuple[np.ndarray, np.ndarray]":
+        """Sample image colour at projected LiDAR point locations.
+
+        Looks up the extrinsic transform between *lidar_name* and *camera_name*
+        and the intrinsic matrix of *camera_name*, then delegates to
+        :func:`~sensor_transposition.lidar_camera.color_lidar_from_image`.
+
+        Args:
+            lidar_name: Name of the source LiDAR sensor in this collection.
+            camera_name: Name of the target camera sensor in this collection.
+                The sensor must have ``intrinsics`` set.
+            points: ``(N, 3)`` float array of 3-D points in the LiDAR frame.
+            image: ``(H, W, C)`` or ``(H, W)`` numpy array representing the image.
+
+        Returns:
+            colors: ``(N, C)`` or ``(N,)`` array of sampled colour values.
+                Invalid points contain zeros.
+            valid_mask: ``(N,)`` boolean array; ``True`` where colour was sampled.
+
+        Raises:
+            KeyError: If either sensor is not found.
+            ValueError: If the camera sensor has no intrinsics.
+        """
+        from sensor_transposition.lidar_camera import color_lidar_from_image as _color
+
+        camera = self.get_sensor(camera_name)
+        if camera.intrinsics is None:
+            raise ValueError(
+                f"Camera sensor '{camera_name}' has no intrinsics set."
+            )
+        T = self.transform_between(lidar_name, camera_name)
+        K = camera.intrinsics.camera_matrix
+        return _color(points, T, K, image)
+
+    # ------------------------------------------------------------------
     # Serialisation
     # ------------------------------------------------------------------
 
