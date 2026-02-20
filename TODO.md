@@ -5,3 +5,4 @@
 - [ ] radar sensor handling
 - [ ] imu handling
 - [ ] integration with kiss icp pub sub
+- [ ] rtk setup and instructions
