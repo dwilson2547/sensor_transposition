@@ -9,6 +9,8 @@ Coordinate systems use standard naming conventions:
   FLU  – Forward, Left, Up   (ROS / ego vehicle convention)
   RDF  – Right, Down, Forward (camera optical convention)
   FRD  – Forward, Right, Down (NED-like convention)
+  ENU  – East, North, Up     (GPS / local tangent plane convention)
+  NED  – North, East, Down   (aviation / navigation convention)
 """
 
 from __future__ import annotations
@@ -84,19 +86,136 @@ class CameraIntrinsics:
 
 
 @dataclass
+class GpsParameters:
+    """Parameters specific to a GPS/GNSS sensor.
+
+    Attributes:
+        reference_latitude: Reference latitude in decimal degrees.
+        reference_longitude: Reference longitude in decimal degrees.
+        reference_altitude: Reference altitude above sea level in metres.
+        coordinate_frame: Local coordinate frame convention for ENU output
+            (e.g. "ENU", "NED").
+    """
+
+    reference_latitude: float = 0.0
+    reference_longitude: float = 0.0
+    reference_altitude: float = 0.0
+    coordinate_frame: str = "ENU"
+
+    def to_dict(self) -> dict:
+        return {
+            "reference_latitude": float(self.reference_latitude),
+            "reference_longitude": float(self.reference_longitude),
+            "reference_altitude": float(self.reference_altitude),
+            "coordinate_frame": self.coordinate_frame,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "GpsParameters":
+        return cls(
+            reference_latitude=float(data.get("reference_latitude", 0.0)),
+            reference_longitude=float(data.get("reference_longitude", 0.0)),
+            reference_altitude=float(data.get("reference_altitude", 0.0)),
+            coordinate_frame=str(data.get("coordinate_frame", "ENU")),
+        )
+
+
+@dataclass
+class ImuParameters:
+    """Parameters specific to an IMU (Inertial Measurement Unit) sensor.
+
+    Attributes:
+        accelerometer_noise_density: Accelerometer noise density in m/s²/√Hz.
+        gyroscope_noise_density: Gyroscope noise density in rad/s/√Hz.
+        accelerometer_random_walk: Accelerometer bias random walk in m/s³/√Hz.
+        gyroscope_random_walk: Gyroscope bias random walk in rad/s²/√Hz.
+        update_rate: Nominal sensor update rate in Hz.
+    """
+
+    accelerometer_noise_density: float = 0.0
+    gyroscope_noise_density: float = 0.0
+    accelerometer_random_walk: float = 0.0
+    gyroscope_random_walk: float = 0.0
+    update_rate: float = 100.0
+
+    def to_dict(self) -> dict:
+        return {
+            "accelerometer_noise_density": float(self.accelerometer_noise_density),
+            "gyroscope_noise_density": float(self.gyroscope_noise_density),
+            "accelerometer_random_walk": float(self.accelerometer_random_walk),
+            "gyroscope_random_walk": float(self.gyroscope_random_walk),
+            "update_rate": float(self.update_rate),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ImuParameters":
+        return cls(
+            accelerometer_noise_density=float(data.get("accelerometer_noise_density", 0.0)),
+            gyroscope_noise_density=float(data.get("gyroscope_noise_density", 0.0)),
+            accelerometer_random_walk=float(data.get("accelerometer_random_walk", 0.0)),
+            gyroscope_random_walk=float(data.get("gyroscope_random_walk", 0.0)),
+            update_rate=float(data.get("update_rate", 100.0)),
+        )
+
+
+@dataclass
+class RadarParameters:
+    """Parameters specific to a radar sensor.
+
+    Attributes:
+        max_range: Maximum detection range in metres.
+        range_resolution: Range resolution in metres.
+        azimuth_fov: Azimuth field of view in degrees (full angle).
+        elevation_fov: Elevation field of view in degrees (full angle).
+        velocity_resolution: Radial velocity resolution in m/s.
+    """
+
+    max_range: float = 0.0
+    range_resolution: float = 0.0
+    azimuth_fov: float = 0.0
+    elevation_fov: float = 0.0
+    velocity_resolution: float = 0.0
+
+    def to_dict(self) -> dict:
+        return {
+            "max_range": float(self.max_range),
+            "range_resolution": float(self.range_resolution),
+            "azimuth_fov": float(self.azimuth_fov),
+            "elevation_fov": float(self.elevation_fov),
+            "velocity_resolution": float(self.velocity_resolution),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "RadarParameters":
+        return cls(
+            max_range=float(data.get("max_range", 0.0)),
+            range_resolution=float(data.get("range_resolution", 0.0)),
+            azimuth_fov=float(data.get("azimuth_fov", 0.0)),
+            elevation_fov=float(data.get("elevation_fov", 0.0)),
+            velocity_resolution=float(data.get("velocity_resolution", 0.0)),
+        )
+
+
+@dataclass
 class Sensor:
     """Represents a single sensor in a collection.
 
     Attributes:
         name: Unique sensor name.
-        sensor_type: "camera", "lidar", "radar", or any custom string.
+        sensor_type: "camera", "lidar", "radar", "gps", "imu", or any custom string.
         coordinate_system: The coordinate frame convention used by this sensor
-            (e.g. "FLU", "RDF", "FRD").
+            (e.g. "FLU", "RDF", "FRD", "ENU", "NED").
         translation: [x, y, z] translation from the sensor origin to the ego
             origin, expressed in the ego frame (metres).
         rotation: Unit quaternion [w, x, y, z] describing the rotation from
             sensor frame to ego frame.
         intrinsics: Camera intrinsic parameters.  Only populated for camera
+            sensors.
+        gps_parameters: GPS-specific parameters.  Only populated for GPS
+            sensors.
+        imu_parameters: IMU-specific parameters.  Only populated for IMU
+            sensors.
+        radar_parameters: Radar-specific parameters.  Only populated for radar
             sensors.
     """
 
@@ -106,6 +225,9 @@ class Sensor:
     translation: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
     rotation: List[float] = field(default_factory=lambda: [1.0, 0.0, 0.0, 0.0])
     intrinsics: Optional[CameraIntrinsics] = None
+    gps_parameters: Optional[GpsParameters] = None
+    imu_parameters: Optional[ImuParameters] = None
+    radar_parameters: Optional[RadarParameters] = None
 
     # ------------------------------------------------------------------
     # Transform helpers
@@ -132,6 +254,12 @@ class Sensor:
         }
         if self.intrinsics is not None:
             data["intrinsics"] = self.intrinsics.to_dict()
+        if self.gps_parameters is not None:
+            data["gps_parameters"] = self.gps_parameters.to_dict()
+        if self.imu_parameters is not None:
+            data["imu_parameters"] = self.imu_parameters.to_dict()
+        if self.radar_parameters is not None:
+            data["radar_parameters"] = self.radar_parameters.to_dict()
         return data
 
     @classmethod
@@ -145,6 +273,18 @@ class Sensor:
         if "intrinsics" in data:
             intrinsics = CameraIntrinsics.from_dict(data["intrinsics"])
 
+        gps_parameters: Optional[GpsParameters] = None
+        if "gps_parameters" in data:
+            gps_parameters = GpsParameters.from_dict(data["gps_parameters"])
+
+        imu_parameters: Optional[ImuParameters] = None
+        if "imu_parameters" in data:
+            imu_parameters = ImuParameters.from_dict(data["imu_parameters"])
+
+        radar_parameters: Optional[RadarParameters] = None
+        if "radar_parameters" in data:
+            radar_parameters = RadarParameters.from_dict(data["radar_parameters"])
+
         return cls(
             name=name,
             sensor_type=data.get("type", "unknown"),
@@ -152,6 +292,9 @@ class Sensor:
             translation=list(translation),
             rotation=list(rotation),
             intrinsics=intrinsics,
+            gps_parameters=gps_parameters,
+            imu_parameters=imu_parameters,
+            radar_parameters=radar_parameters,
         )
 
 
