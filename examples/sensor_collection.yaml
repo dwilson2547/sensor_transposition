@@ -78,3 +78,36 @@ sensors:
       translation: [2.10, 0.00, 0.55]
       rotation:
         quaternion: [1.0, 0.0, 0.0, 0.0]
+    radar_parameters:
+      max_range: 200.0           # metres
+      range_resolution: 0.4      # metres
+      azimuth_fov: 90.0          # degrees
+      elevation_fov: 14.0        # degrees
+      velocity_resolution: 0.1   # m/s
+
+  gnss:
+    type: gps
+    coordinate_system: ENU
+    extrinsics:
+      translation: [0.00, 0.00, 1.60]   # roof-mounted antenna
+      rotation:
+        quaternion: [1.0, 0.0, 0.0, 0.0]
+    gps_parameters:
+      reference_latitude: 37.7749        # San Francisco, CA (example)
+      reference_longitude: -122.4194
+      reference_altitude: 16.0
+      coordinate_frame: ENU
+
+  imu:
+    type: imu
+    coordinate_system: FLU
+    extrinsics:
+      translation: [0.00, 0.00, 0.50]   # vehicle body centre
+      rotation:
+        quaternion: [1.0, 0.0, 0.0, 0.0]
+    imu_parameters:
+      accelerometer_noise_density: 0.003924   # m/s²/√Hz  (typical MEMS)
+      gyroscope_noise_density: 0.000205       # rad/s/√Hz
+      accelerometer_random_walk: 0.004330     # m/s³/√Hz
+      gyroscope_random_walk: 0.0000438        # rad/s²/√Hz
+      update_rate: 200.0                      # Hz

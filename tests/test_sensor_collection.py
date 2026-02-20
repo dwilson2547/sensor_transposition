@@ -11,6 +11,9 @@ import yaml
 
 from sensor_transposition.sensor_collection import (
     CameraIntrinsics,
+    GpsParameters,
+    ImuParameters,
+    RadarParameters,
     Sensor,
     SensorCollection,
     _quaternion_to_rotation_matrix,
@@ -52,6 +55,98 @@ class TestCameraIntrinsics:
         assert ci2.fx == pytest.approx(ci.fx)
         assert ci2.fy == pytest.approx(ci.fy)
         assert ci2.distortion_coefficients == pytest.approx(ci.distortion_coefficients)
+
+
+# ---------------------------------------------------------------------------
+# GpsParameters tests
+# ---------------------------------------------------------------------------
+
+
+class TestGpsParameters:
+    def test_defaults(self):
+        gps = GpsParameters()
+        assert gps.reference_latitude == 0.0
+        assert gps.reference_longitude == 0.0
+        assert gps.reference_altitude == 0.0
+        assert gps.coordinate_frame == "ENU"
+
+    def test_round_trip_dict(self):
+        gps = GpsParameters(
+            reference_latitude=37.7749,
+            reference_longitude=-122.4194,
+            reference_altitude=16.0,
+            coordinate_frame="ENU",
+        )
+        gps2 = GpsParameters.from_dict(gps.to_dict())
+        assert gps2.reference_latitude == pytest.approx(gps.reference_latitude)
+        assert gps2.reference_longitude == pytest.approx(gps.reference_longitude)
+        assert gps2.reference_altitude == pytest.approx(gps.reference_altitude)
+        assert gps2.coordinate_frame == gps.coordinate_frame
+
+    def test_from_dict_missing_keys_use_defaults(self):
+        gps = GpsParameters.from_dict({})
+        assert gps.reference_latitude == 0.0
+        assert gps.coordinate_frame == "ENU"
+
+
+# ---------------------------------------------------------------------------
+# ImuParameters tests
+# ---------------------------------------------------------------------------
+
+
+class TestImuParameters:
+    def test_defaults(self):
+        imu = ImuParameters()
+        assert imu.accelerometer_noise_density == 0.0
+        assert imu.gyroscope_noise_density == 0.0
+        assert imu.update_rate == 100.0
+
+    def test_round_trip_dict(self):
+        imu = ImuParameters(
+            accelerometer_noise_density=0.003924,
+            gyroscope_noise_density=0.000205,
+            accelerometer_random_walk=0.004330,
+            gyroscope_random_walk=0.0000438,
+            update_rate=200.0,
+        )
+        imu2 = ImuParameters.from_dict(imu.to_dict())
+        assert imu2.accelerometer_noise_density == pytest.approx(imu.accelerometer_noise_density)
+        assert imu2.gyroscope_noise_density == pytest.approx(imu.gyroscope_noise_density)
+        assert imu2.update_rate == pytest.approx(imu.update_rate)
+
+    def test_from_dict_missing_keys_use_defaults(self):
+        imu = ImuParameters.from_dict({})
+        assert imu.update_rate == 100.0
+
+
+# ---------------------------------------------------------------------------
+# RadarParameters tests
+# ---------------------------------------------------------------------------
+
+
+class TestRadarParameters:
+    def test_defaults(self):
+        radar = RadarParameters()
+        assert radar.max_range == 0.0
+        assert radar.azimuth_fov == 0.0
+
+    def test_round_trip_dict(self):
+        radar = RadarParameters(
+            max_range=200.0,
+            range_resolution=0.4,
+            azimuth_fov=90.0,
+            elevation_fov=14.0,
+            velocity_resolution=0.1,
+        )
+        radar2 = RadarParameters.from_dict(radar.to_dict())
+        assert radar2.max_range == pytest.approx(radar.max_range)
+        assert radar2.range_resolution == pytest.approx(radar.range_resolution)
+        assert radar2.azimuth_fov == pytest.approx(radar.azimuth_fov)
+        assert radar2.velocity_resolution == pytest.approx(radar.velocity_resolution)
+
+    def test_from_dict_missing_keys_use_defaults(self):
+        radar = RadarParameters.from_dict({})
+        assert radar.max_range == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +200,76 @@ class TestSensor:
         s2 = Sensor.from_dict(s.name, s.to_dict())
         assert s2.intrinsics is not None
         assert s2.intrinsics.fx == pytest.approx(800.0)
+
+    def test_gps_sensor_round_trip(self):
+        gps_params = GpsParameters(
+            reference_latitude=37.7749,
+            reference_longitude=-122.4194,
+            reference_altitude=16.0,
+        )
+        s = Sensor(
+            name="gnss",
+            sensor_type="gps",
+            coordinate_system="ENU",
+            translation=[0.0, 0.0, 1.6],
+            rotation=[1.0, 0.0, 0.0, 0.0],
+            gps_parameters=gps_params,
+        )
+        s2 = Sensor.from_dict(s.name, s.to_dict())
+        assert s2.sensor_type == "gps"
+        assert s2.gps_parameters is not None
+        assert s2.gps_parameters.reference_latitude == pytest.approx(37.7749)
+        assert s2.gps_parameters.coordinate_frame == "ENU"
+
+    def test_imu_sensor_round_trip(self):
+        imu_params = ImuParameters(
+            accelerometer_noise_density=0.003924,
+            gyroscope_noise_density=0.000205,
+            update_rate=200.0,
+        )
+        s = Sensor(
+            name="imu",
+            sensor_type="imu",
+            coordinate_system="FLU",
+            translation=[0.0, 0.0, 0.5],
+            rotation=[1.0, 0.0, 0.0, 0.0],
+            imu_parameters=imu_params,
+        )
+        s2 = Sensor.from_dict(s.name, s.to_dict())
+        assert s2.sensor_type == "imu"
+        assert s2.imu_parameters is not None
+        assert s2.imu_parameters.update_rate == pytest.approx(200.0)
+
+    def test_radar_sensor_round_trip(self):
+        radar_params = RadarParameters(
+            max_range=200.0,
+            range_resolution=0.4,
+            azimuth_fov=90.0,
+        )
+        s = Sensor(
+            name="front_radar",
+            sensor_type="radar",
+            coordinate_system="FLU",
+            translation=[2.1, 0.0, 0.55],
+            rotation=[1.0, 0.0, 0.0, 0.0],
+            radar_parameters=radar_params,
+        )
+        s2 = Sensor.from_dict(s.name, s.to_dict())
+        assert s2.sensor_type == "radar"
+        assert s2.radar_parameters is not None
+        assert s2.radar_parameters.max_range == pytest.approx(200.0)
+
+    def test_sensor_no_parameters_returns_none(self):
+        s = Sensor(
+            name="front_lidar",
+            sensor_type="lidar",
+            coordinate_system="FLU",
+            translation=[1.8, 0.0, 1.9],
+            rotation=[1.0, 0.0, 0.0, 0.0],
+        )
+        assert s.gps_parameters is None
+        assert s.imu_parameters is None
+        assert s.radar_parameters is None
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +381,21 @@ class TestSensorCollection:
         front_cam = col.get_sensor("front_camera")
         assert front_cam.sensor_type == "camera"
         assert front_cam.intrinsics is not None
+        # Verify GPS sensor
+        gnss = col.get_sensor("gnss")
+        assert gnss.sensor_type == "gps"
+        assert gnss.gps_parameters is not None
+        assert gnss.gps_parameters.coordinate_frame == "ENU"
+        # Verify IMU sensor
+        imu = col.get_sensor("imu")
+        assert imu.sensor_type == "imu"
+        assert imu.imu_parameters is not None
+        assert imu.imu_parameters.update_rate == pytest.approx(200.0)
+        # Verify radar sensor
+        radar = col.get_sensor("front_radar")
+        assert radar.sensor_type == "radar"
+        assert radar.radar_parameters is not None
+        assert radar.radar_parameters.max_range == pytest.approx(200.0)
 
     def test_remove_sensor(self):
         col = self._make_collection()
