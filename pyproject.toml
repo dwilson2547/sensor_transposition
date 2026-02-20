@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sensor_transposition"
+version = "0.1.0"
+description = "Suite of tools for sensor transposition and camera intrinsic/extrinsic calibration"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.21",
+    "pyyaml>=6.0",
+    "scipy>=1.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sensor_transposition*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

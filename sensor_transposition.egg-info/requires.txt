@@ -1,0 +1,7 @@
+numpy>=1.21
+pyyaml>=6.0
+scipy>=1.7
+
+[dev]
+pytest>=7.0
+pytest-cov>=4.0

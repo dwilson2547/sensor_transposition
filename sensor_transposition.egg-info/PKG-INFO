@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: sensor_transposition
+Version: 0.1.0
+Summary: Suite of tools for sensor transposition and camera intrinsic/extrinsic calibration
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.21
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: scipy>=1.7
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.0; extra == "dev"
+
+# sensor_transposition
+suite of tools for sensor transposition and calculating intrinsics/extrinsics for cameras using the pinhole model
