@@ -222,7 +222,8 @@ class TestFramePoseSequence:
             path = f.name
         try:
             seq.to_yaml(path)
-            raw = yaml.safe_load(open(path))
+            with open(path) as f:
+                raw = yaml.safe_load(f)
             assert raw["frame_duration"] == pytest.approx(0.1)
             assert len(raw["poses"]) == 1
             assert raw["poses"][0]["timestamp"] == pytest.approx(0.0)
