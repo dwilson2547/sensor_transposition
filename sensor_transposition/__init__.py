@@ -6,6 +6,7 @@ transposition, camera intrinsic calibration, and LiDAR data parsing.
 from sensor_transposition.sensor_collection import SensorCollection, Sensor, CameraIntrinsics
 from sensor_transposition.sensor_collection import GpsParameters, ImuParameters, RadarParameters
 from sensor_transposition.transform import Transform
+from sensor_transposition.frame_pose import FramePose, FramePoseSequence
 from sensor_transposition import camera_intrinsics
 from sensor_transposition import lidar
 from sensor_transposition import lidar_camera
@@ -21,6 +22,8 @@ __all__ = [
     "ImuParameters",
     "RadarParameters",
     "Transform",
+    "FramePose",
+    "FramePoseSequence",
     "camera_intrinsics",
     "lidar",
     "lidar_camera",
