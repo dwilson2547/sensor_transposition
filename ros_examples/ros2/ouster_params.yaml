@@ -1,0 +1,53 @@
+# ROS 2 parameter file for the Ouster driver
+# (ouster_ros – ROS 2 branch)
+#
+# Package  : ouster_ros (ROS 2)
+# Source   : https://github.com/ouster-lidar/ouster-ros  (branch ros2)
+# Install  : clone into your workspace and build with colcon
+#
+# Usage:
+#   ros2 launch ouster_ros driver.launch.py \
+#       params_file:=<path-to-this-file>
+#
+# Supported sensors : OS0, OS1, OS2 (all beam counts)
+
+ouster_driver:
+  ros__parameters:
+    # --- Network ---
+    sensor_hostname: "os-122xxxxxxxxx.local"  # Hostname or IP of the Ouster sensor
+    udp_dest: ""                               # Destination IP for UDP (empty = auto)
+    lidar_port: 7502                           # UDP port for lidar packets
+    imu_port: 7503                             # UDP port for IMU packets
+
+    # --- Sensor configuration ---
+    # Resolution × scan-rate combinations:
+    #   512x10 | 512x20 | 1024x10 | 1024x20 | 2048x10
+    lidar_mode: "1024x10"
+
+    # Timestamp source:
+    #   TIME_FROM_INTERNAL_OSC | TIME_FROM_SYNC_PULSE_IN | TIME_FROM_PTP_1588
+    timestamp_mode: "TIME_FROM_INTERNAL_OSC"
+
+    # Path to a saved sensor metadata JSON (required when replaying a .pcap file;
+    # leave empty for a live sensor – metadata is fetched automatically).
+    metadata: ""
+
+    # --- TF frames (all follow FLU convention) ---
+    sensor_frame: "os_sensor"   # Sensor origin frame
+    lidar_frame:  "os_lidar"    # Lidar data frame
+    imu_frame:    "os_imu"      # IMU data frame
+
+    # --- Point-cloud configuration ---
+    # Point fields included in the output PointCloud2 message.
+    # Available fields vary by firmware; common choices:
+    #   RANGE | SIGNAL | REFLECTIVITY | NEAR_IR | AMBIENT
+    point_cloud_frame: "os_lidar"
+
+    # Minimum and maximum range filter (m).
+    # Ouster default: 0.0 – sensor max (50 m for OS0, 100 m for OS1, 240 m for OS2).
+    min_range: 0.5
+    max_range: 100.0
+
+    # --- IMU ---
+    # Set to true to publish sensor_msgs/Imu on ~/imu
+    publish_imu: true
