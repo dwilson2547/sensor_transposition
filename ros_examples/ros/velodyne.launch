@@ -1,0 +1,47 @@
+<!-- ROS 1 launch file for Velodyne LiDAR (VLP-16 / VLP-32C / HDL-32E / HDL-64E)
+     Requires: velodyne_driver and velodyne_pointcloud packages
+     Install:  sudo apt install ros-<distro>-velodyne
+-->
+<launch>
+  <!-- Sensor connection -->
+  <arg name="device_ip"     default="192.168.1.201" />
+  <arg name="port"          default="2368" />
+  <arg name="model"         default="VLP16"
+       doc="Velodyne model: VLP16 | VLP32C | HDL32E | HDL64E" />
+
+  <!-- Point-cloud assembly -->
+  <arg name="rpm"           default="600"
+       doc="Motor RPM. Common values: 300, 600, 900, 1200" />
+  <arg name="frame_id"      default="velodyne"
+       doc="TF frame attached to the sensor (FLU convention)" />
+  <arg name="calibration"   default="$(find velodyne_pointcloud)/params/VLP16db.yaml"
+       doc="Per-beam calibration file shipped with velodyne_pointcloud" />
+  <arg name="min_range"     default="0.4"  doc="Minimum range filter (m)" />
+  <arg name="max_range"     default="130.0" doc="Maximum range filter (m)" />
+  <arg name="view_direction" default="0.0"  doc="Centre of the field-of-view (rad)" />
+  <arg name="view_width"    default="6.283185307" doc="Width of the field-of-view (rad, default = 2π = full 360°)" />
+
+  <!-- Driver node: produces raw velodyne_msgs/VelodyneScan on /velodyne_packets -->
+  <node pkg="velodyne_driver" type="velodyne_node" name="velodyne_driver_node"
+        output="screen">
+    <param name="device_ip"      value="$(arg device_ip)" />
+    <param name="port"           value="$(arg port)" />
+    <param name="model"          value="$(arg model)" />
+    <param name="rpm"            value="$(arg rpm)" />
+    <param name="frame_id"       value="$(arg frame_id)" />
+    <param name="pcap"           value="" />
+  </node>
+
+  <!-- Point-cloud node: converts packets → sensor_msgs/PointCloud2 on /velodyne_points -->
+  <node pkg="velodyne_pointcloud" type="transform_node" name="velodyne_transform_node"
+        output="screen">
+    <param name="model"          value="$(arg model)" />
+    <param name="calibration"    value="$(arg calibration)" />
+    <param name="min_range"      value="$(arg min_range)" />
+    <param name="max_range"      value="$(arg max_range)" />
+    <param name="view_direction" value="$(arg view_direction)" />
+    <param name="view_width"     value="$(arg view_width)" />
+    <param name="fixed_frame"    value="" />
+    <param name="target_frame"   value="" />
+  </node>
+</launch>

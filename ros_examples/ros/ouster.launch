@@ -1,0 +1,56 @@
+<!-- ROS 1 launch file for Ouster LiDAR (OS0 / OS1 / OS2)
+     Requires: ouster_ros package
+     Install:  https://github.com/ouster-lidar/ouster-ros  (clone into your workspace)
+-->
+<launch>
+  <!-- Sensor connection -->
+  <arg name="sensor_hostname" default="os-122xxxxxxxxx.local"
+       doc="Hostname or IP address of the Ouster sensor" />
+  <arg name="udp_dest"        default=""
+       doc="Optional: destination IP for UDP data (leave empty for auto-detect)" />
+  <arg name="lidar_port"      default="7502" doc="UDP port for lidar data" />
+  <arg name="imu_port"        default="7503" doc="UDP port for IMU data" />
+
+  <!-- Sensor configuration -->
+  <arg name="lidar_mode"      default="1024x10"
+       doc="Resolution and scan rate: 512x10 | 512x20 | 1024x10 | 1024x20 | 2048x10" />
+  <arg name="timestamp_mode"  default="TIME_FROM_INTERNAL_OSC"
+       doc="TIME_FROM_INTERNAL_OSC | TIME_FROM_SYNC_PULSE_IN | TIME_FROM_PTP_1588" />
+  <arg name="metadata"        default=""
+       doc="Path to a saved sensor metadata JSON file (required when replaying a PCAP)" />
+
+  <!-- Frame / output settings -->
+  <arg name="sensor_frame"    default="os_sensor"
+       doc="TF frame for the sensor origin (FLU convention)" />
+  <arg name="lidar_frame"     default="os_lidar"
+       doc="TF frame for the lidar data" />
+  <arg name="imu_frame"       default="os_imu"
+       doc="TF frame for IMU data" />
+  <arg name="viz"             default="false"
+       doc="Launch the Ouster built-in visualiser" />
+
+  <!-- Ouster driver node -->
+  <!-- Publishes:
+         /os_cloud_node/points      sensor_msgs/PointCloud2
+         /os_cloud_node/imu         sensor_msgs/Imu
+  -->
+  <node pkg="ouster_ros" type="os_node" name="os_node" output="screen" required="true">
+    <param name="~/sensor_hostname" value="$(arg sensor_hostname)" />
+    <param name="~/udp_dest"        value="$(arg udp_dest)" />
+    <param name="~/lidar_port"      value="$(arg lidar_port)" />
+    <param name="~/imu_port"        value="$(arg imu_port)" />
+    <param name="~/lidar_mode"      value="$(arg lidar_mode)" />
+    <param name="~/timestamp_mode"  value="$(arg timestamp_mode)" />
+    <param name="~/metadata"        value="$(arg metadata)" />
+  </node>
+
+  <!-- Cloud decoder node: converts raw packets → PointCloud2 -->
+  <node pkg="ouster_ros" type="os_cloud_node" name="os_cloud_node" output="screen" required="true">
+    <remap from="~/os_config"  to="/os_node/os_config" />
+    <remap from="~/lidar_packets" to="/os_node/lidar_packets" />
+    <remap from="~/imu_packets"   to="/os_node/imu_packets" />
+    <param name="~/sensor_frame" value="$(arg sensor_frame)" />
+    <param name="~/lidar_frame"  value="$(arg lidar_frame)" />
+    <param name="~/imu_frame"    value="$(arg imu_frame)" />
+  </node>
+</launch>

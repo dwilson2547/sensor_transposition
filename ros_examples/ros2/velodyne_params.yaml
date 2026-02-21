@@ -1,0 +1,52 @@
+# ROS 2 parameter file for the Velodyne driver stack
+# (velodyne_driver + velodyne_pointcloud)
+#
+# Packages : velodyne_driver, velodyne_pointcloud
+# Install  : sudo apt install ros-<distro>-velodyne
+#
+# Usage:
+#   ros2 launch velodyne velodyne-all-nodes-VLP16-launch.py \
+#       params_file:=<path-to-this-file>
+#
+# Supported models : VLP16 | VLP32C | HDL32E | HDL64E
+
+velodyne_driver_node:
+  ros__parameters:
+    # --- Network ---
+    device_ip: "192.168.1.201"   # IP address of the Velodyne sensor
+    port: 2368                    # UDP port the sensor streams to
+
+    # --- Sensor model & motion ---
+    model: "VLP16"                # VLP16 | VLP32C | HDL32E | HDL64E
+    rpm: 600.0                    # Motor speed (300 / 600 / 900 / 1200 RPM)
+    frame_id: "velodyne"          # TF frame attached to the sensor (FLU convention)
+
+    # --- Replay (leave empty for live sensor) ---
+    pcap: ""                      # Path to a .pcap capture file; empty = live
+
+    # --- Diagnostics ---
+    diag_period: 0.2              # Diagnostic update period (s)
+    read_fast: false
+    read_once: false
+    repeat_delay: 0.0
+
+velodyne_transform_node:
+  ros__parameters:
+    # --- Model & calibration ---
+    model: "VLP16"
+    calibration: ""               # Leave empty to use the built-in default for the model
+
+    # --- Range filter ---
+    min_range: 0.4                # Minimum valid range (m)
+    max_range: 130.0              # Maximum valid range (m)
+
+    # --- Field-of-view crop (radians; default = full 360°) ---
+    view_direction: 0.0           # Centre direction of the FOV window
+    view_width: 6.283185307       # Width of the FOV window (2π = full circle)
+
+    # --- Output frame ---
+    fixed_frame: ""               # Leave empty to keep points in the sensor frame
+    target_frame: ""              # Leave empty to keep points in the sensor frame
+
+    # --- Ordering ---
+    organize_cloud: true          # Produce a structured (ring-ordered) cloud
