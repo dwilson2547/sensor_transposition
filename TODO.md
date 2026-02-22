@@ -7,4 +7,4 @@
 - [ ] integration with kiss icp pub sub
 - [ ] rtk setup and instructions
 - [ ] visualization platform that can sync the data from multiple sensors and display the output to the user
-- [ ] handling of 270 degree fisheye camera
+- [x] handling of 270 degree fisheye camera

@@ -1,7 +1,7 @@
 """
 camera_intrinsics.py
 
-Tools for calculating pinhole camera intrinsic parameters.
+Tools for calculating pinhole and fisheye camera intrinsic parameters.
 
 The pinhole camera model maps a 3-D point (X, Y, Z) in the camera frame to a
 2-D pixel (u, v) via::
@@ -11,6 +11,16 @@ The pinhole camera model maps a 3-D point (X, Y, Z) in the camera frame to a
 
 Focal lengths *fx* and *fy* can be derived from the sensor geometry or from
 the diagonal / horizontal / vertical field-of-view angles.
+
+The fisheye (Kannala-Brandt) model uses the equidistant projection::
+
+    r = f * θ_d
+    θ_d = θ * (1 + k1*θ² + k2*θ⁴ + k3*θ⁶ + k4*θ⁸)
+    θ = atan2(sqrt(X² + Y²), Z)
+
+where *r* is the distance from the principal point to the projected pixel.
+This model supports fields of view up to 360°, making it suitable for
+omnidirectional cameras.
 """
 
 from __future__ import annotations
@@ -228,3 +238,228 @@ def undistort_point(
         if np.linalg.norm(error) < tolerance:
             break
     return x_u
+
+
+# ---------------------------------------------------------------------------
+# Fisheye / omnidirectional camera model (Kannala-Brandt)
+# ---------------------------------------------------------------------------
+
+
+def fisheye_focal_length_from_fov(image_size: int, fov_deg: float) -> float:
+    """Calculate focal length in pixels for an equidistant fisheye camera.
+
+    The equidistant (equiangular) projection maps the incidence angle *θ* to
+    the image radius *r* via ``r = f * θ``.  At the image edge
+    ``r = image_size / 2`` and ``θ = fov_rad / 2``, giving::
+
+        f = (image_size / 2) / (fov_rad / 2)
+
+    This model is valid for fields of view up to 360°, making it suitable for
+    omnidirectional cameras.
+
+    Args:
+        image_size: Image width (for horizontal FOV) or height (for vertical
+            FOV) in pixels.
+        fov_deg: Field of view in degrees.  Must be in ``(0, 360)``.
+
+    Returns:
+        Focal length in pixels.
+    """
+    if image_size <= 0:
+        raise ValueError(f"image_size must be positive, got {image_size}.")
+    if not (0.0 < fov_deg < 360.0):
+        raise ValueError(f"fov_deg must be in (0, 360), got {fov_deg}.")
+    fov_rad = math.radians(fov_deg)
+    return (image_size / 2.0) / (fov_rad / 2.0)
+
+
+def fisheye_distort_point(
+    point_normalised: np.ndarray,
+    dist_coeffs: Tuple[float, ...] = (),
+) -> np.ndarray:
+    """Apply Kannala-Brandt fisheye distortion to a normalised image point.
+
+    The Kannala-Brandt model maps the incidence angle *θ* to the distorted
+    angle *θ_d*::
+
+        θ_d = θ * (1 + k1*θ² + k2*θ⁴ + k3*θ⁶ + k4*θ⁸)
+
+    where ``θ = atan(r)`` and ``r = sqrt(x_n² + y_n²)`` for normalised
+    coordinates ``(x_n, y_n) = (X/Z, Y/Z)``.
+
+    Args:
+        point_normalised: (2,) undistorted normalised coordinates
+            ``[x_n, y_n]`` where ``x_n = X/Z``, ``y_n = Y/Z``.
+        dist_coeffs: Kannala-Brandt coefficients ``(k1, k2, k3, k4)``.
+            Defaults to no distortion.
+
+    Returns:
+        (2,) distorted normalised coordinates.
+    """
+    x, y = float(point_normalised[0]), float(point_normalised[1])
+    k1, k2, k3, k4 = (list(dist_coeffs) + [0.0] * 4)[:4]
+    r = math.sqrt(x * x + y * y)
+    if r < 1e-8:
+        return np.array([x, y], dtype=float)
+    theta = math.atan(r)
+    theta2 = theta * theta
+    theta4 = theta2 * theta2
+    theta6 = theta4 * theta2
+    theta8 = theta4 * theta4
+    theta_d = theta * (1.0 + k1 * theta2 + k2 * theta4 + k3 * theta6 + k4 * theta8)
+    scale = theta_d / r
+    return np.array([x * scale, y * scale], dtype=float)
+
+
+def fisheye_undistort_point(
+    point_distorted: np.ndarray,
+    dist_coeffs: Tuple[float, ...] = (),
+    max_iterations: int = 20,
+    tolerance: float = 1e-8,
+) -> np.ndarray:
+    """Remove Kannala-Brandt fisheye distortion from a normalised image point.
+
+    Inverts the distortion polynomial using Newton-Raphson iteration to recover
+    the undistorted normalised coordinates.
+
+    Args:
+        point_distorted: (2,) distorted normalised coordinates.
+        dist_coeffs: Kannala-Brandt coefficients ``(k1, k2, k3, k4)``.
+            Defaults to no distortion.
+        max_iterations: Maximum Newton-Raphson iterations.
+        tolerance: Convergence tolerance on the angle correction.
+
+    Returns:
+        (2,) undistorted normalised coordinates.
+    """
+    x_d, y_d = float(point_distorted[0]), float(point_distorted[1])
+    k1, k2, k3, k4 = (list(dist_coeffs) + [0.0] * 4)[:4]
+    r_d = math.sqrt(x_d * x_d + y_d * y_d)
+    if r_d < 1e-8:
+        return np.array([x_d, y_d], dtype=float)
+    # Newton-Raphson: find θ such that θ_d(θ) = r_d
+    theta = r_d
+    for _ in range(max_iterations):
+        theta2 = theta * theta
+        theta4 = theta2 * theta2
+        theta6 = theta4 * theta2
+        theta8 = theta4 * theta4
+        theta_d = theta * (1.0 + k1 * theta2 + k2 * theta4 + k3 * theta6 + k4 * theta8)
+        f_prime = 1.0 + 3.0 * k1 * theta2 + 5.0 * k2 * theta4 + 7.0 * k3 * theta6 + 9.0 * k4 * theta8
+        delta = (theta_d - r_d) / f_prime if abs(f_prime) > 1e-12 else 0.0
+        theta -= delta
+        if abs(delta) < tolerance:
+            break
+    # Recover undistorted normalised radius: r = tan(θ)
+    r_u = math.tan(theta)
+    scale = r_u / r_d
+    return np.array([x_d * scale, y_d * scale], dtype=float)
+
+
+def fisheye_project_point(
+    K: np.ndarray,
+    point_camera: np.ndarray,
+    dist_coeffs: Tuple[float, ...] = (),
+) -> Tuple[float, float]:
+    """Project a 3-D point to pixel coordinates using the fisheye camera model.
+
+    Uses the Kannala-Brandt equidistant projection::
+
+        θ   = atan2(sqrt(X² + Y²), Z)
+        θ_d = θ * (1 + k1*θ² + k2*θ⁴ + k3*θ⁶ + k4*θ⁸)
+        u   = fx * θ_d * X / sqrt(X² + Y²) + cx
+        v   = fy * θ_d * Y / sqrt(X² + Y²) + cy
+
+    Unlike the pinhole model, this projection works for points with large
+    off-axis angles (including angles ≥ 90°), making it suitable for
+    fisheye and omnidirectional cameras.
+
+    Args:
+        K: 3×3 camera intrinsic matrix.
+        point_camera: (3,) array ``[X, Y, Z]`` in the camera frame.
+        dist_coeffs: Kannala-Brandt coefficients ``(k1, k2, k3, k4)``.
+            Defaults to no distortion.
+
+    Returns:
+        (u, v) pixel coordinates.
+    """
+    pt = np.asarray(point_camera, dtype=float)
+    if pt.shape != (3,):
+        raise ValueError(f"point_camera must be shape (3,), got {pt.shape}.")
+    X, Y, Z = pt
+    r_xy = math.sqrt(X * X + Y * Y)
+    theta = math.atan2(r_xy, Z)
+    k1, k2, k3, k4 = (list(dist_coeffs) + [0.0] * 4)[:4]
+    theta2 = theta * theta
+    theta4 = theta2 * theta2
+    theta6 = theta4 * theta2
+    theta8 = theta4 * theta4
+    theta_d = theta * (1.0 + k1 * theta2 + k2 * theta4 + k3 * theta6 + k4 * theta8)
+    if r_xy < 1e-8:
+        x_d, y_d = 0.0, 0.0
+    else:
+        x_d = theta_d * X / r_xy
+        y_d = theta_d * Y / r_xy
+    fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
+    return float(fx * x_d + cx), float(fy * y_d + cy)
+
+
+def fisheye_unproject_pixel(
+    K: np.ndarray,
+    pixel: Tuple[float, float],
+    depth: float,
+    dist_coeffs: Tuple[float, ...] = (),
+    max_iterations: int = 20,
+    tolerance: float = 1e-8,
+) -> np.ndarray:
+    """Unproject a fisheye pixel to a 3-D camera-frame point.
+
+    Inverts the Kannala-Brandt projection.  *depth* is the Euclidean distance
+    from the camera origin to the 3-D point (i.e. ``‖[X, Y, Z]‖``).
+
+    Args:
+        K: 3×3 camera intrinsic matrix.
+        pixel: (u, v) pixel coordinates.
+        depth: Euclidean distance from the camera origin in metres.  Must be
+            positive.
+        dist_coeffs: Kannala-Brandt coefficients ``(k1, k2, k3, k4)``.
+            Defaults to no distortion.
+        max_iterations: Maximum Newton-Raphson iterations for distortion
+            inversion.
+        tolerance: Convergence tolerance.
+
+    Returns:
+        (3,) array ``[X, Y, Z]`` in the camera frame.
+    """
+    if depth <= 0:
+        raise ValueError(f"depth must be positive, got {depth}.")
+    u, v = float(pixel[0]), float(pixel[1])
+    fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
+    x_d = (u - cx) / fx
+    y_d = (v - cy) / fy
+    r_d = math.sqrt(x_d * x_d + y_d * y_d)
+    if r_d < 1e-8:
+        return np.array([0.0, 0.0, depth], dtype=float)
+    # Invert the distortion polynomial: find θ such that θ_d(θ) = r_d
+    k1, k2, k3, k4 = (list(dist_coeffs) + [0.0] * 4)[:4]
+    theta = r_d
+    for _ in range(max_iterations):
+        theta2 = theta * theta
+        theta4 = theta2 * theta2
+        theta6 = theta4 * theta2
+        theta8 = theta4 * theta4
+        theta_d = theta * (1.0 + k1 * theta2 + k2 * theta4 + k3 * theta6 + k4 * theta8)
+        f_prime = 1.0 + 3.0 * k1 * theta2 + 5.0 * k2 * theta4 + 7.0 * k3 * theta6 + 9.0 * k4 * theta8
+        delta = (theta_d - r_d) / f_prime if abs(f_prime) > 1e-12 else 0.0
+        theta -= delta
+        if abs(delta) < tolerance:
+            break
+    # Reconstruct the 3-D direction unit vector
+    sin_theta = math.sin(theta)
+    cos_theta = math.cos(theta)
+    direction = np.array([
+        sin_theta * x_d / r_d,
+        sin_theta * y_d / r_d,
+        cos_theta,
+    ], dtype=float)
+    return direction * depth

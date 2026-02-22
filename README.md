@@ -12,6 +12,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
 - [Modules](#modules)
   - [SensorCollection](#sensorcollection)
   - [Camera Intrinsics](#camera-intrinsics)
+  - [Fisheye / Omnidirectional Camera](#fisheye--omnidirectional-camera)
   - [Transform](#transform)
   - [LiDAR–Camera Fusion](#lidar-camera-fusion)
   - [LiDAR Parsers](#lidar-parsers)
@@ -27,6 +28,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
 
 - **Sensor collection** – YAML-driven multi-sensor configuration storing extrinsics (translation + quaternion) and per-sensor intrinsics/parameters for cameras, LiDARs, radars, GPS, and IMUs.
 - **Pinhole camera model** – focal-length derivation from FOV or physical sensor geometry, camera matrix construction, point projection / unprojection, and Brown–Conrady lens distortion/undistortion.
+- **Fisheye / omnidirectional camera model** – Kannala-Brandt equidistant projection supporting fields of view up to 360°, with focal-length derivation, point projection / unprojection, and Kannala-Brandt distortion/undistortion (compatible with OpenCV's `cv2.fisheye` module).
 - **Homogeneous transforms** – composable 4×4 `Transform` objects with helpers for building from quaternions or rotation matrices, inverting, and applying to point clouds.
 - **LiDAR–camera fusion** – project 3-D LiDAR point clouds onto a camera image plane and colour the cloud by sampling pixel values.
 - **LiDAR parsers** – binary readers for Velodyne (KITTI `.bin`), Ouster (4-column and 8-column `.bin`), and Livox (LVX / LVX2) file formats.
@@ -126,6 +128,53 @@ coeffs = (-0.05, 0.08, 0.0, 0.0, -0.03)  # (k1, k2, p1, p2, k3)
 distorted = distort_point([x_n, y_n], coeffs)
 undistorted = undistort_point(distorted, coeffs)
 ```
+
+---
+
+### Fisheye / Omnidirectional Camera
+
+Kannala-Brandt equidistant projection for wide-FOV and omnidirectional
+cameras.  Supports fields of view up to 360° and is compatible with
+coefficients from OpenCV's `cv2.fisheye.calibrate`.
+
+```python
+from sensor_transposition.camera_intrinsics import (
+    fisheye_focal_length_from_fov,
+    fisheye_project_point,
+    fisheye_unproject_pixel,
+    fisheye_distort_point,
+    fisheye_undistort_point,
+    camera_matrix,
+)
+import numpy as np
+
+# Focal length for a 190° horizontal FOV on a 1920-pixel-wide sensor
+fx = fisheye_focal_length_from_fov(image_size=1920, fov_deg=190.0)
+fy = fisheye_focal_length_from_fov(image_size=1080, fov_deg=130.0)
+
+K = camera_matrix(fx=fx, fy=fy, cx=960.0, cy=540.0)
+
+# Distortion coefficients (k1, k2, k3, k4) from cv2.fisheye.calibrate
+dist_coeffs = (0.05, -0.02, 0.003, -0.001)
+
+# Project a 3-D point (including points with large off-axis angles)
+point_3d = np.array([0.8, 0.4, 3.0])
+u, v = fisheye_project_point(K, point_3d, dist_coeffs=dist_coeffs)
+
+# Unproject: depth is the Euclidean distance ‖[X, Y, Z]‖, not Z
+depth = float(np.linalg.norm(point_3d))
+recovered = fisheye_unproject_pixel(K, (u, v), depth=depth,
+                                    dist_coeffs=dist_coeffs)
+
+# Apply / remove Kannala-Brandt distortion on normalised coordinates
+x_n, y_n = point_3d[0] / point_3d[2], point_3d[1] / point_3d[2]
+distorted   = fisheye_distort_point([x_n, y_n], dist_coeffs)
+undistorted = fisheye_undistort_point(distorted, dist_coeffs)
+```
+
+See [`docs/fisheye_camera_intrinsics_guide.md`](docs/fisheye_camera_intrinsics_guide.md)
+for a full guide including how to calibrate with OpenCV and how to handle
+omnidirectional cameras with FOV > 180°.
 
 ---
 
