@@ -169,7 +169,7 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 The following is a consolidated list of all identified gaps, ordered roughly by the impact they have on completing a working SLAM pipeline:
 
 ### Blocking / High Priority
-- [ ] Fisheye/omnidirectional camera model (Kannala–Brandt)
+- [X] Fisheye/omnidirectional camera model (Kannala–Brandt)
 - [ ] Multi-sensor time synchronisation / interpolation utilities
 - [ ] ROS launch/parameter files for cameras, GPS, IMU, and radar
 - [ ] GPS/RTK driver integration and ECEF/ENU/UTM conversion
