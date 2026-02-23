@@ -164,6 +164,51 @@ class TestSensor:
             rotation=[1.0, 0.0, 0.0, 0.0],  # identity
         )
 
+    def test_time_offset_default_is_zero(self):
+        s = self._make_sensor()
+        assert s.time_offset_sec == 0.0
+
+    def test_time_offset_set_and_round_trip_dict(self):
+        s = Sensor(
+            name="front_camera",
+            sensor_type="camera",
+            coordinate_system="RDF",
+            translation=[1.8, 0.0, 1.45],
+            rotation=[1.0, 0.0, 0.0, 0.0],
+            time_offset_sec=0.033,
+        )
+        d = s.to_dict()
+        assert d["extrinsics"]["time_offset_sec"] == pytest.approx(0.033)
+        s2 = Sensor.from_dict(s.name, d)
+        assert s2.time_offset_sec == pytest.approx(0.033)
+
+    def test_time_offset_missing_in_dict_defaults_to_zero(self):
+        """Old YAML files without time_offset_sec should deserialize to 0."""
+        data = {
+            "type": "lidar",
+            "coordinate_system": "FLU",
+            "extrinsics": {
+                "translation": [1.84, 0.0, 1.91],
+                "rotation": {"quaternion": [1.0, 0.0, 0.0, 0.0]},
+                # no time_offset_sec key
+            },
+        }
+        s = Sensor.from_dict("front_lidar", data)
+        assert s.time_offset_sec == 0.0
+
+    def test_time_offset_negative_value(self):
+        s = Sensor(
+            name="front_radar",
+            sensor_type="radar",
+            coordinate_system="FLU",
+            translation=[2.1, 0.0, 0.55],
+            rotation=[1.0, 0.0, 0.0, 0.0],
+            time_offset_sec=-0.010,
+        )
+        d = s.to_dict()
+        s2 = Sensor.from_dict(s.name, d)
+        assert s2.time_offset_sec == pytest.approx(-0.010)
+
     def test_transform_to_ego_identity_rotation(self):
         s = self._make_sensor()
         T = s.transform_to_ego
@@ -357,6 +402,78 @@ class TestSensorCollection:
         expected_translation = np.array([1.5, 0.0, 1.4]) - np.array([1.8, 0.0, 1.9])
         np.testing.assert_allclose(T[:3, 3], expected_translation, atol=1e-10)
 
+    # ------------------------------------------------------------------
+    # Time-offset tests
+    # ------------------------------------------------------------------
+
+    def _make_collection_with_offsets(self) -> SensorCollection:
+        lidar = Sensor(
+            name="front_lidar",
+            sensor_type="lidar",
+            coordinate_system="FLU",
+            translation=[1.84, 0.0, 1.91],
+            rotation=[1.0, 0.0, 0.0, 0.0],
+            time_offset_sec=0.0,
+        )
+        cam = Sensor(
+            name="front_camera",
+            sensor_type="camera",
+            coordinate_system="RDF",
+            translation=[1.80, 0.0, 1.45],
+            rotation=[1.0, 0.0, 0.0, 0.0],
+            time_offset_sec=0.033,
+            intrinsics=CameraIntrinsics(fx=800.0, fy=800.0, cx=640.0, cy=360.0, width=1280, height=720),
+        )
+        radar = Sensor(
+            name="front_radar",
+            sensor_type="radar",
+            coordinate_system="FLU",
+            translation=[2.1, 0.0, 0.55],
+            rotation=[1.0, 0.0, 0.0, 0.0],
+            time_offset_sec=-0.010,
+        )
+        return SensorCollection([lidar, cam, radar])
+
+    def test_time_offset_between_same_sensor_is_zero(self):
+        col = self._make_collection_with_offsets()
+        assert col.time_offset_between("front_lidar", "front_lidar") == pytest.approx(0.0)
+
+    def test_time_offset_between_lidar_to_camera(self):
+        """Camera is 33 ms ahead of lidar; offset should be +0.033."""
+        col = self._make_collection_with_offsets()
+        assert col.time_offset_between("front_lidar", "front_camera") == pytest.approx(0.033)
+
+    def test_time_offset_between_camera_to_lidar(self):
+        """Inverse direction should be -0.033."""
+        col = self._make_collection_with_offsets()
+        assert col.time_offset_between("front_camera", "front_lidar") == pytest.approx(-0.033)
+
+    def test_time_offset_between_antisymmetric(self):
+        """time_offset_between(a, b) == -time_offset_between(b, a)."""
+        col = self._make_collection_with_offsets()
+        ab = col.time_offset_between("front_lidar", "front_radar")
+        ba = col.time_offset_between("front_radar", "front_lidar")
+        assert ab == pytest.approx(-ba)
+
+    def test_time_offset_between_radar_to_camera(self):
+        """Radar is -10 ms, camera is +33 ms; camera-radar = 43 ms."""
+        col = self._make_collection_with_offsets()
+        assert col.time_offset_between("front_radar", "front_camera") == pytest.approx(0.043)
+
+    def test_time_offset_yaml_round_trip(self):
+        col = self._make_collection_with_offsets()
+        with tempfile.NamedTemporaryFile(suffix=".yaml", delete=False) as f:
+            path = f.name
+        try:
+            col.to_yaml(path)
+            col2 = SensorCollection.from_yaml(path)
+            for name in col.sensor_names:
+                s1 = col.get_sensor(name)
+                s2 = col2.get_sensor(name)
+                assert s1.time_offset_sec == pytest.approx(s2.time_offset_sec)
+        finally:
+            os.unlink(path)
+
     def test_yaml_round_trip(self):
         col = self._make_collection()
         with tempfile.NamedTemporaryFile(suffix=".yaml", delete=False) as f:
@@ -396,6 +513,12 @@ class TestSensorCollection:
         assert radar.sensor_type == "radar"
         assert radar.radar_parameters is not None
         assert radar.radar_parameters.max_range == pytest.approx(200.0)
+        # Verify time offsets from the example YAML
+        assert front_cam.time_offset_sec == pytest.approx(0.033)
+        assert col.get_sensor("front_lidar").time_offset_sec == pytest.approx(0.0)
+        assert radar.time_offset_sec == pytest.approx(-0.010)
+        # time_offset_between: camera is 43 ms ahead of radar
+        assert col.time_offset_between("front_radar", "front_camera") == pytest.approx(0.043)
 
     def test_remove_sensor(self):
         col = self._make_collection()

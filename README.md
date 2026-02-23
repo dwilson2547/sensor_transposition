@@ -26,7 +26,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
 
 ## Features
 
-- **Sensor collection** – YAML-driven multi-sensor configuration storing extrinsics (translation + quaternion) and per-sensor intrinsics/parameters for cameras, LiDARs, radars, GPS, and IMUs.
+- **Sensor collection** – YAML-driven multi-sensor configuration storing extrinsics (translation + quaternion), **temporal extrinsic calibration** (time offset per sensor), and per-sensor intrinsics/parameters for cameras, LiDARs, radars, GPS, and IMUs.
 - **Pinhole camera model** – focal-length derivation from FOV or physical sensor geometry, camera matrix construction, point projection / unprojection, and Brown–Conrady lens distortion/undistortion.
 - **Fisheye / omnidirectional camera model** – Kannala-Brandt equidistant projection supporting fields of view up to 360°, with focal-length derivation, point projection / unprojection, and Kannala-Brandt distortion/undistortion (compatible with OpenCV's `cv2.fisheye` module).
 - **Homogeneous transforms** – composable 4×4 `Transform` objects with helpers for building from quaternions or rotation matrices, inverting, and applying to point clouds.
@@ -88,7 +88,17 @@ col.to_yaml("my_rig.yaml")
 ```
 
 **YAML sensor types:** `camera`, `lidar`, `radar`, `gps`, `imu`.  
-Each entry specifies `coordinate_system`, `extrinsics` (translation + quaternion), and optional type-specific parameter blocks.
+Each entry specifies `coordinate_system`, `extrinsics` (translation + quaternion + optional `time_offset_sec`), and optional type-specific parameter blocks.
+
+**Temporal extrinsic calibration** – each sensor can declare a `time_offset_sec` in its `extrinsics` block that captures the delay between the sensor's hardware clock and the reference/ego clock.  Use `SensorCollection.time_offset_between(source, target)` to compute the time difference between any two sensors:
+
+```python
+# How many seconds ahead is the camera clock relative to the LiDAR clock?
+dt = col.time_offset_between("front_lidar", "front_camera")   # e.g. +0.033
+
+# Synchronise a LiDAR timestamp to the camera's timebase
+t_camera_equiv = t_lidar + dt
+```
 
 ---
 
@@ -353,6 +363,7 @@ sensors:
       translation: [1.84, 0.00, 1.91]
       rotation:
         quaternion: [1.0, 0.0, 0.0, 0.0]
+      time_offset_sec: 0.0              # LiDAR is the reference clock
 
   front_camera:
     type: camera
@@ -361,6 +372,7 @@ sensors:
       translation: [1.80, 0.00, 1.45]
       rotation:
         quaternion: [0.5, -0.5, 0.5, -0.5]
+      time_offset_sec: 0.033            # camera triggers ~33 ms after reference
     intrinsics:
       fx: 1266.417
       fy: 1266.417

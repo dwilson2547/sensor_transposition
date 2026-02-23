@@ -8,9 +8,14 @@
 #                       FLU  = Forward / Left  / Up   (ROS convention)
 #                       RDF  = Right  / Down   / Forward (camera optical)
 #                       FRD  = Forward / Right / Down
-#   extrinsics       – 6-DoF pose of the sensor **relative to the ego frame**
+#   extrinsics       – 6-DoF pose of the sensor **relative to the ego frame**,
+#                      plus an optional temporal calibration offset
 #       translation  – [x, y, z] in metres
 #       rotation     – unit quaternion [w, x, y, z]
+#       time_offset_sec – temporal extrinsic: time offset of this sensor's
+#                         timestamps relative to the ego/reference clock (s).
+#                         Positive = this sensor's clock is ahead of reference.
+#                         Defaults to 0.0 if omitted.
 #
 # For camera sensors an additional "intrinsics" block is required:
 #   fx, fy           – focal lengths in pixels
@@ -30,6 +35,7 @@ sensors:
       translation: [1.80, 0.00, 1.45]   # 1.8 m ahead, 1.45 m above ground
       rotation:
         quaternion: [0.5, -0.5, 0.5, -0.5]  # 90° roll to align RDF with FLU
+      time_offset_sec: 0.033             # camera triggers ~33 ms after reference clock
     intrinsics:
       fx: 1266.417
       fy: 1266.417
@@ -46,6 +52,7 @@ sensors:
       translation: [1.60, 0.39, 1.44]
       rotation:
         quaternion: [0.643, -0.358, 0.358, -0.577]
+      time_offset_sec: 0.033
     intrinsics:
       fx: 1257.8
       fy: 1257.8
@@ -62,6 +69,7 @@ sensors:
       translation: [1.84, 0.00, 1.91]   # roof-mounted unit
       rotation:
         quaternion: [1.0, 0.0, 0.0, 0.0]  # no rotation from ego
+      time_offset_sec: 0.0               # LiDAR is the reference clock
 
   rear_lidar:
     type: lidar
@@ -70,6 +78,7 @@ sensors:
       translation: [-0.50, 0.00, 1.85]
       rotation:
         quaternion: [0.0, 0.0, 0.0, 1.0]   # 180° yaw rotation
+      time_offset_sec: 0.0
 
   front_radar:
     type: radar
@@ -78,6 +87,7 @@ sensors:
       translation: [2.10, 0.00, 0.55]
       rotation:
         quaternion: [1.0, 0.0, 0.0, 0.0]
+      time_offset_sec: -0.010            # radar clock is 10 ms behind reference
     radar_parameters:
       max_range: 200.0           # metres
       range_resolution: 0.4      # metres
@@ -92,6 +102,7 @@ sensors:
       translation: [0.00, 0.00, 1.60]   # roof-mounted antenna
       rotation:
         quaternion: [1.0, 0.0, 0.0, 0.0]
+      time_offset_sec: 0.0
     gps_parameters:
       reference_latitude: 37.7749        # San Francisco, CA (example)
       reference_longitude: -122.4194
@@ -105,6 +116,7 @@ sensors:
       translation: [0.00, 0.00, 0.50]   # vehicle body centre
       rotation:
         quaternion: [1.0, 0.0, 0.0, 0.0]
+      time_offset_sec: 0.0
     imu_parameters:
       accelerometer_noise_density: 0.003924   # m/s²/√Hz  (typical MEMS)
       gyroscope_noise_density: 0.000205       # rad/s/√Hz
