@@ -14,6 +14,7 @@ from sensor_transposition.sync import (
     interpolate_timestamps,
 )
 from sensor_transposition import camera_intrinsics
+from sensor_transposition import calibration
 from sensor_transposition import lidar
 from sensor_transposition import lidar_camera
 from sensor_transposition import gps
@@ -35,6 +36,7 @@ __all__ = [
     "apply_time_offset",
     "find_nearest_indices",
     "interpolate_timestamps",
+    "calibration",
     "camera_intrinsics",
     "lidar",
     "lidar_camera",
