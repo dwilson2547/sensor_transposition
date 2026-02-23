@@ -7,12 +7,19 @@ from sensor_transposition.sensor_collection import SensorCollection, Sensor, Cam
 from sensor_transposition.sensor_collection import GpsParameters, ImuParameters, RadarParameters
 from sensor_transposition.transform import Transform
 from sensor_transposition.frame_pose import FramePose, FramePoseSequence
+from sensor_transposition.sync import (
+    SensorSynchroniser,
+    apply_time_offset,
+    find_nearest_indices,
+    interpolate_timestamps,
+)
 from sensor_transposition import camera_intrinsics
 from sensor_transposition import lidar
 from sensor_transposition import lidar_camera
 from sensor_transposition import gps
 from sensor_transposition import imu
 from sensor_transposition import radar
+from sensor_transposition import sync
 
 __all__ = [
     "SensorCollection",
@@ -24,10 +31,15 @@ __all__ = [
     "Transform",
     "FramePose",
     "FramePoseSequence",
+    "SensorSynchroniser",
+    "apply_time_offset",
+    "find_nearest_indices",
+    "interpolate_timestamps",
     "camera_intrinsics",
     "lidar",
     "lidar_camera",
     "gps",
     "imu",
     "radar",
+    "sync",
 ]
