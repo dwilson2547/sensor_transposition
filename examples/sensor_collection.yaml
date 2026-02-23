@@ -123,3 +123,7 @@ sensors:
       accelerometer_random_walk: 0.004330     # m/s³/√Hz
       gyroscope_random_walk: 0.0000438        # rad/s²/√Hz
       update_rate: 200.0                      # Hz
+      accelerometer_bias: [0.012, -0.008, 0.005]   # m/s²  (calibrated offsets)
+      gyroscope_bias: [0.0003, -0.0002, 0.0001]    # rad/s (calibrated offsets)
+      accelerometer_scale_factors: [1.002, 0.998, 1.001]   # dimensionless
+      gyroscope_scale_factors: [0.999, 1.001, 1.000]       # dimensionless
