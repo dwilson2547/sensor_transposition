@@ -209,6 +209,10 @@ class Sensor:
             origin, expressed in the ego frame (metres).
         rotation: Unit quaternion [w, x, y, z] describing the rotation from
             sensor frame to ego frame.
+        time_offset_sec: Temporal extrinsic calibration – the time offset of
+            this sensor's timestamps relative to the ego/reference clock, in
+            seconds.  A positive value means this sensor's clock is ahead of
+            the reference clock.  Defaults to ``0.0``.
         intrinsics: Camera intrinsic parameters.  Only populated for camera
             sensors.
         gps_parameters: GPS-specific parameters.  Only populated for GPS
@@ -224,6 +228,7 @@ class Sensor:
     coordinate_system: str
     translation: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
     rotation: List[float] = field(default_factory=lambda: [1.0, 0.0, 0.0, 0.0])
+    time_offset_sec: float = 0.0
     intrinsics: Optional[CameraIntrinsics] = None
     gps_parameters: Optional[GpsParameters] = None
     imu_parameters: Optional[ImuParameters] = None
@@ -250,6 +255,7 @@ class Sensor:
                 "rotation": {
                     "quaternion": [float(v) for v in self.rotation],
                 },
+                "time_offset_sec": float(self.time_offset_sec),
             },
         }
         if self.intrinsics is not None:
@@ -268,6 +274,7 @@ class Sensor:
         translation = extrinsics.get("translation", [0.0, 0.0, 0.0])
         rotation_data = extrinsics.get("rotation", {})
         rotation = rotation_data.get("quaternion", [1.0, 0.0, 0.0, 0.0])
+        time_offset_sec = float(extrinsics.get("time_offset_sec", 0.0))
 
         intrinsics: Optional[CameraIntrinsics] = None
         if "intrinsics" in data:
@@ -291,6 +298,7 @@ class Sensor:
             coordinate_system=data.get("coordinate_system", "FLU"),
             translation=list(translation),
             rotation=list(rotation),
+            time_offset_sec=time_offset_sec,
             intrinsics=intrinsics,
             gps_parameters=gps_parameters,
             imu_parameters=imu_parameters,
@@ -373,6 +381,29 @@ class SensorCollection:
         T_src = self.transform_to_ego(source)
         T_tgt = self.transform_to_ego(target)
         return np.linalg.inv(T_tgt) @ T_src
+
+    def time_offset_between(self, source: str, target: str) -> float:
+        """Return the time offset from *source* to *target* sensor in seconds.
+
+        The result is the amount of time that must be **added to a** *source*
+        **timestamp** to obtain the equivalent *target* timestamp::
+
+            t_target = t_source + time_offset_between(source, target)
+
+        This is computed as::
+
+            time_offset_between(source, target)
+                = target.time_offset_sec - source.time_offset_sec
+
+        Args:
+            source: Name of the source sensor.
+            target: Name of the target sensor.
+
+        Returns:
+            Time offset in seconds (positive means *target* clock is ahead of
+            *source* clock).
+        """
+        return self.get_sensor(target).time_offset_sec - self.get_sensor(source).time_offset_sec
 
     # ------------------------------------------------------------------
     # LiDAR-camera fusion
