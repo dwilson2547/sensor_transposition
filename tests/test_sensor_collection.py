@@ -100,6 +100,10 @@ class TestImuParameters:
         assert imu.accelerometer_noise_density == 0.0
         assert imu.gyroscope_noise_density == 0.0
         assert imu.update_rate == 100.0
+        assert imu.accelerometer_bias == [0.0, 0.0, 0.0]
+        assert imu.gyroscope_bias == [0.0, 0.0, 0.0]
+        assert imu.accelerometer_scale_factors == [1.0, 1.0, 1.0]
+        assert imu.gyroscope_scale_factors == [1.0, 1.0, 1.0]
 
     def test_round_trip_dict(self):
         imu = ImuParameters(
@@ -108,15 +112,49 @@ class TestImuParameters:
             accelerometer_random_walk=0.004330,
             gyroscope_random_walk=0.0000438,
             update_rate=200.0,
+            accelerometer_bias=[0.012, -0.008, 0.005],
+            gyroscope_bias=[0.0003, -0.0002, 0.0001],
+            accelerometer_scale_factors=[1.002, 0.998, 1.001],
+            gyroscope_scale_factors=[0.999, 1.001, 1.000],
         )
         imu2 = ImuParameters.from_dict(imu.to_dict())
         assert imu2.accelerometer_noise_density == pytest.approx(imu.accelerometer_noise_density)
         assert imu2.gyroscope_noise_density == pytest.approx(imu.gyroscope_noise_density)
         assert imu2.update_rate == pytest.approx(imu.update_rate)
+        assert imu2.accelerometer_bias == pytest.approx(imu.accelerometer_bias)
+        assert imu2.gyroscope_bias == pytest.approx(imu.gyroscope_bias)
+        assert imu2.accelerometer_scale_factors == pytest.approx(imu.accelerometer_scale_factors)
+        assert imu2.gyroscope_scale_factors == pytest.approx(imu.gyroscope_scale_factors)
 
     def test_from_dict_missing_keys_use_defaults(self):
         imu = ImuParameters.from_dict({})
         assert imu.update_rate == 100.0
+        assert imu.accelerometer_bias == [0.0, 0.0, 0.0]
+        assert imu.gyroscope_bias == [0.0, 0.0, 0.0]
+        assert imu.accelerometer_scale_factors == [1.0, 1.0, 1.0]
+        assert imu.gyroscope_scale_factors == [1.0, 1.0, 1.0]
+
+    def test_bias_scale_preserved_in_sensor_round_trip(self):
+        imu_params = ImuParameters(
+            accelerometer_bias=[0.01, -0.005, 0.002],
+            gyroscope_bias=[0.0002, 0.0001, -0.0003],
+            accelerometer_scale_factors=[1.001, 0.999, 1.0],
+            gyroscope_scale_factors=[1.0, 1.002, 0.998],
+        )
+        s = Sensor(
+            name="imu",
+            sensor_type="imu",
+            coordinate_system="FLU",
+            translation=[0.0, 0.0, 0.5],
+            rotation=[1.0, 0.0, 0.0, 0.0],
+            imu_parameters=imu_params,
+        )
+        s2 = Sensor.from_dict(s.name, s.to_dict())
+        assert s2.imu_parameters is not None
+        assert s2.imu_parameters.accelerometer_bias == pytest.approx([0.01, -0.005, 0.002])
+        assert s2.imu_parameters.gyroscope_bias == pytest.approx([0.0002, 0.0001, -0.0003])
+        assert s2.imu_parameters.accelerometer_scale_factors == pytest.approx([1.001, 0.999, 1.0])
+        assert s2.imu_parameters.gyroscope_scale_factors == pytest.approx([1.0, 1.002, 0.998])
 
 
 # ---------------------------------------------------------------------------
@@ -508,6 +546,10 @@ class TestSensorCollection:
         assert imu.sensor_type == "imu"
         assert imu.imu_parameters is not None
         assert imu.imu_parameters.update_rate == pytest.approx(200.0)
+        assert imu.imu_parameters.accelerometer_bias == pytest.approx([0.012, -0.008, 0.005])
+        assert imu.imu_parameters.gyroscope_bias == pytest.approx([0.0003, -0.0002, 0.0001])
+        assert imu.imu_parameters.accelerometer_scale_factors == pytest.approx([1.002, 0.998, 1.001])
+        assert imu.imu_parameters.gyroscope_scale_factors == pytest.approx([0.999, 1.001, 1.000])
         # Verify radar sensor
         radar = col.get_sensor("front_radar")
         assert radar.sensor_type == "radar"

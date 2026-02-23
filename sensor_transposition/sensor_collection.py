@@ -125,11 +125,25 @@ class ImuParameters:
     """Parameters specific to an IMU (Inertial Measurement Unit) sensor.
 
     Attributes:
-        accelerometer_noise_density: Accelerometer noise density in m/s²/√Hz.
-        gyroscope_noise_density: Gyroscope noise density in rad/s/√Hz.
-        accelerometer_random_walk: Accelerometer bias random walk in m/s³/√Hz.
-        gyroscope_random_walk: Gyroscope bias random walk in rad/s²/√Hz.
+        accelerometer_noise_density: Accelerometer noise density in m/s²/√Hz
+            (Allan-variance white-noise coefficient).
+        gyroscope_noise_density: Gyroscope noise density in rad/s/√Hz
+            (Allan-variance white-noise coefficient).
+        accelerometer_random_walk: Accelerometer bias random walk in m/s³/√Hz
+            (Allan-variance random-walk coefficient).
+        gyroscope_random_walk: Gyroscope bias random walk in rad/s²/√Hz
+            (Allan-variance random-walk coefficient).
         update_rate: Nominal sensor update rate in Hz.
+        accelerometer_bias: Calibrated accelerometer bias vector [bx, by, bz]
+            in m/s².  Defaults to ``[0.0, 0.0, 0.0]``.
+        gyroscope_bias: Calibrated gyroscope bias vector [bx, by, bz] in
+            rad/s.  Defaults to ``[0.0, 0.0, 0.0]``.
+        accelerometer_scale_factors: Axis-wise scale-factor corrections for the
+            accelerometer [sx, sy, sz] (dimensionless multipliers applied to the
+            raw measurement).  Defaults to ``[1.0, 1.0, 1.0]``.
+        gyroscope_scale_factors: Axis-wise scale-factor corrections for the
+            gyroscope [sx, sy, sz] (dimensionless multipliers applied to the raw
+            measurement).  Defaults to ``[1.0, 1.0, 1.0]``.
     """
 
     accelerometer_noise_density: float = 0.0
@@ -137,6 +151,10 @@ class ImuParameters:
     accelerometer_random_walk: float = 0.0
     gyroscope_random_walk: float = 0.0
     update_rate: float = 100.0
+    accelerometer_bias: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
+    gyroscope_bias: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
+    accelerometer_scale_factors: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.0])
+    gyroscope_scale_factors: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.0])
 
     def to_dict(self) -> dict:
         return {
@@ -145,6 +163,10 @@ class ImuParameters:
             "accelerometer_random_walk": float(self.accelerometer_random_walk),
             "gyroscope_random_walk": float(self.gyroscope_random_walk),
             "update_rate": float(self.update_rate),
+            "accelerometer_bias": [float(v) for v in self.accelerometer_bias],
+            "gyroscope_bias": [float(v) for v in self.gyroscope_bias],
+            "accelerometer_scale_factors": [float(v) for v in self.accelerometer_scale_factors],
+            "gyroscope_scale_factors": [float(v) for v in self.gyroscope_scale_factors],
         }
 
     @classmethod
@@ -155,6 +177,10 @@ class ImuParameters:
             accelerometer_random_walk=float(data.get("accelerometer_random_walk", 0.0)),
             gyroscope_random_walk=float(data.get("gyroscope_random_walk", 0.0)),
             update_rate=float(data.get("update_rate", 100.0)),
+            accelerometer_bias=[float(v) for v in data.get("accelerometer_bias", [0.0, 0.0, 0.0])],
+            gyroscope_bias=[float(v) for v in data.get("gyroscope_bias", [0.0, 0.0, 0.0])],
+            accelerometer_scale_factors=[float(v) for v in data.get("accelerometer_scale_factors", [1.0, 1.0, 1.0])],
+            gyroscope_scale_factors=[float(v) for v in data.get("gyroscope_scale_factors", [1.0, 1.0, 1.0])],
         )
 
 
