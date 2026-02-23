@@ -1,7 +1,8 @@
 """
 camera_intrinsics.py
 
-Tools for calculating pinhole and fisheye camera intrinsic parameters.
+Tools for calculating pinhole and fisheye camera intrinsic parameters, and for
+modelling rolling-shutter cameras.
 
 The pinhole camera model maps a 3-D point (X, Y, Z) in the camera frame to a
 2-D pixel (u, v) via::
@@ -21,6 +22,14 @@ The fisheye (Kannala-Brandt) model uses the equidistant projection::
 where *r* is the distance from the principal point to the projected pixel.
 This model supports fields of view up to 360°, making it suitable for
 omnidirectional cameras.
+
+The rolling-shutter model corrects for the per-row exposure delay present in
+CMOS sensors.  Each row is captured at a slightly different time, so a moving
+camera introduces geometric distortion.  The first-order correction shifts a
+camera-frame point by the camera's instantaneous velocity scaled by the row's
+time offset from the frame start::
+
+    p_corrected ≈ p - t_row * (v + ω × p)
 """
 
 from __future__ import annotations
@@ -402,6 +411,185 @@ def fisheye_project_point(
         y_d = theta_d * Y / r_xy
     fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
     return float(fx * x_d + cx), float(fy * y_d + cy)
+
+
+# ---------------------------------------------------------------------------
+# Rolling-shutter model
+# ---------------------------------------------------------------------------
+
+
+def rolling_shutter_row_time(
+    row: int,
+    image_height: int,
+    readout_time: float,
+) -> float:
+    """Return the time offset from frame start for a given image row.
+
+    A rolling-shutter sensor exposes one row at a time.  The first row is
+    captured at ``t = 0`` and the last row at ``t = readout_time``.  Each
+    intermediate row is captured at a linearly interpolated time::
+
+        t_row = (row / (image_height - 1)) * readout_time
+
+    Args:
+        row: Row index (0-indexed).  Must satisfy ``0 <= row < image_height``.
+        image_height: Total number of rows in the image.  Must be >= 2.
+        readout_time: Total time to read out the full frame in seconds.
+            Must be non-negative.  Pass ``0`` to model a global-shutter camera.
+
+    Returns:
+        Time offset in seconds from the frame start for the given row.
+    """
+    if image_height < 2:
+        raise ValueError(f"image_height must be >= 2, got {image_height}.")
+    if not (0 <= row < image_height):
+        raise ValueError(
+            f"row must be in [0, {image_height - 1}], got {row}."
+        )
+    if readout_time < 0:
+        raise ValueError(
+            f"readout_time must be non-negative, got {readout_time}."
+        )
+    return (row / (image_height - 1)) * readout_time
+
+
+def rolling_shutter_correct_point(
+    point_camera: np.ndarray,
+    linear_velocity: np.ndarray,
+    angular_velocity: np.ndarray,
+    row_time: float,
+) -> np.ndarray:
+    """Apply first-order rolling-shutter motion correction to a camera-frame point.
+
+    Models the apparent shift of a 3-D point due to camera motion between
+    the frame-start reference time and the time at which the point's row is
+    captured.  Under a constant-velocity assumption and a first-order
+    (small-angle) approximation the corrected point is::
+
+        p_corrected ≈ p - row_time * (v + ω × p)
+
+    where *v* is the camera's linear velocity and *ω* is its angular velocity,
+    both expressed in the camera frame.
+
+    Args:
+        point_camera: (3,) array ``[X, Y, Z]`` in the camera frame at the
+            frame-start reference time.
+        linear_velocity: (3,) linear velocity ``[vx, vy, vz]`` of the camera
+            expressed in the camera frame, in metres per second.
+        angular_velocity: (3,) angular velocity ``[ωx, ωy, ωz]`` of the
+            camera expressed in the camera frame, in radians per second.
+        row_time: Time offset from the frame start in seconds for the row at
+            which the point is captured (see :func:`rolling_shutter_row_time`).
+
+    Returns:
+        (3,) corrected camera-frame point.
+    """
+    p = np.asarray(point_camera, dtype=float)
+    v = np.asarray(linear_velocity, dtype=float)
+    omega = np.asarray(angular_velocity, dtype=float)
+    if p.shape != (3,):
+        raise ValueError(f"point_camera must be shape (3,), got {p.shape}.")
+    if v.shape != (3,):
+        raise ValueError(
+            f"linear_velocity must be shape (3,), got {v.shape}."
+        )
+    if omega.shape != (3,):
+        raise ValueError(
+            f"angular_velocity must be shape (3,), got {omega.shape}."
+        )
+    return p - row_time * (v + np.cross(omega, p))
+
+
+def rolling_shutter_project_point(
+    K: np.ndarray,
+    point_camera: np.ndarray,
+    linear_velocity: np.ndarray,
+    angular_velocity: np.ndarray,
+    image_height: int,
+    readout_time: float,
+    dist_coeffs: Tuple[float, ...] = (),
+    max_iterations: int = 10,
+    tolerance: float = 1e-6,
+) -> Tuple[float, float]:
+    """Project a camera-frame point to pixel coordinates with rolling-shutter correction.
+
+    Iteratively solves for the pixel row at which the scene point is captured.
+    Because the row determines the row_time, which determines the corrected
+    camera-frame point, which in turn determines the projected row, a
+    fixed-point iteration is used:
+
+    1. Project the undistorted point at reference time to obtain an initial
+       row estimate.
+    2. Compute the ``row_time`` for that row using
+       :func:`rolling_shutter_row_time`.
+    3. Apply :func:`rolling_shutter_correct_point` to obtain the point in the
+       camera frame at ``row_time``.
+    4. Re-project (with optional distortion) and repeat until the v-coordinate
+       converges.
+
+    Setting ``readout_time=0`` recovers the standard global-shutter pinhole
+    projection (possibly with Brown–Conrady distortion).
+
+    Args:
+        K: 3×3 camera intrinsic matrix.
+        point_camera: (3,) array ``[X, Y, Z]`` in the camera frame at the
+            frame-start reference time.  Z must be > 0.
+        linear_velocity: (3,) linear velocity of the camera in the camera
+            frame, in metres per second.
+        angular_velocity: (3,) angular velocity of the camera in the camera
+            frame, in radians per second.
+        image_height: Total number of rows in the image.  Must be >= 2.
+        readout_time: Total frame readout time in seconds.  Must be
+            non-negative.
+        dist_coeffs: Brown–Conrady distortion coefficients
+            ``(k1, k2, p1, p2, k3)``.  Defaults to no distortion.
+        max_iterations: Maximum fixed-point iterations for row convergence.
+        tolerance: Convergence tolerance on the v (row) coordinate in pixels.
+
+    Returns:
+        ``(u, v)`` pixel coordinates after rolling-shutter correction.
+    """
+    pt = np.asarray(point_camera, dtype=float)
+    if pt.shape != (3,):
+        raise ValueError(f"point_camera must be shape (3,), got {pt.shape}.")
+    if pt[2] <= 0:
+        raise ValueError(f"Point is behind the camera (Z={pt[2]}).")
+    if image_height < 2:
+        raise ValueError(f"image_height must be >= 2, got {image_height}.")
+    if readout_time < 0:
+        raise ValueError(
+            f"readout_time must be non-negative, got {readout_time}."
+        )
+
+    fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
+
+    def _project(p3d: np.ndarray) -> Tuple[float, float]:
+        x_n, y_n = p3d[0] / p3d[2], p3d[1] / p3d[2]
+        if dist_coeffs:
+            x_n, y_n = distort_point(np.array([x_n, y_n]), dist_coeffs)
+        return fx * x_n + cx, fy * y_n + cy
+
+    # Seed: project at reference time (row_time = 0)
+    u, v = _project(pt)
+
+    for _ in range(max_iterations):
+        v_clamped = float(np.clip(v, 0.0, image_height - 1))
+        row_time = (v_clamped / (image_height - 1)) * readout_time
+        pt_corr = rolling_shutter_correct_point(
+            pt, linear_velocity, angular_velocity, row_time
+        )
+        if pt_corr[2] <= 0:
+            raise ValueError(
+                "Rolling-shutter corrected point is behind the camera "
+                f"(Z={pt_corr[2]})."
+            )
+        u_new, v_new = _project(pt_corr)
+        if abs(v_new - v) < tolerance:
+            u, v = u_new, v_new
+            break
+        u, v = u_new, v_new
+
+    return float(u), float(v)
 
 
 def fisheye_unproject_pixel(

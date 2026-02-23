@@ -17,6 +17,9 @@ from sensor_transposition.camera_intrinsics import (
     focal_length_from_sensor,
     fov_from_focal_length,
     project_point,
+    rolling_shutter_correct_point,
+    rolling_shutter_project_point,
+    rolling_shutter_row_time,
     undistort_point,
     unproject_pixel,
 )
@@ -296,3 +299,190 @@ class TestFisheyeProjectUnproject:
     def test_project_invalid_shape(self):
         with pytest.raises(ValueError, match="shape"):
             fisheye_project_point(self.K, [0.0, 1.0])
+
+
+# ---------------------------------------------------------------------------
+# Rolling-shutter model
+# ---------------------------------------------------------------------------
+
+
+class TestRollingShutterRowTime:
+    def test_first_row_is_zero(self):
+        assert rolling_shutter_row_time(0, 480, 0.033) == pytest.approx(0.0)
+
+    def test_last_row_equals_readout_time(self):
+        assert rolling_shutter_row_time(479, 480, 0.033) == pytest.approx(0.033)
+
+    def test_middle_row(self):
+        """Row 239 of 480 rows with 0.033 s readout."""
+        t = rolling_shutter_row_time(239, 480, 0.033)
+        expected = (239 / 479) * 0.033
+        assert t == pytest.approx(expected, rel=1e-6)
+
+    def test_zero_readout_time_always_zero(self):
+        """A zero readout time models a global-shutter camera."""
+        assert rolling_shutter_row_time(100, 480, 0.0) == pytest.approx(0.0)
+
+    def test_invalid_image_height(self):
+        with pytest.raises(ValueError, match="image_height"):
+            rolling_shutter_row_time(0, 1, 0.033)
+
+    def test_invalid_row_negative(self):
+        with pytest.raises(ValueError, match="row"):
+            rolling_shutter_row_time(-1, 480, 0.033)
+
+    def test_invalid_row_out_of_bounds(self):
+        with pytest.raises(ValueError, match="row"):
+            rolling_shutter_row_time(480, 480, 0.033)
+
+    def test_invalid_readout_time(self):
+        with pytest.raises(ValueError, match="readout_time"):
+            rolling_shutter_row_time(0, 480, -0.001)
+
+
+class TestRollingShutterCorrectPoint:
+    def test_zero_row_time_returns_original(self):
+        """At t=0 (first row / global shutter) the point is unchanged."""
+        p = np.array([1.0, 0.5, 3.0])
+        v = np.array([0.1, 0.0, 0.0])
+        omega = np.array([0.0, 0.05, 0.0])
+        p_corr = rolling_shutter_correct_point(p, v, omega, 0.0)
+        np.testing.assert_allclose(p_corr, p, atol=1e-12)
+
+    def test_zero_velocity_returns_original(self):
+        """With no camera motion the point is unchanged."""
+        p = np.array([0.5, -0.3, 2.0])
+        v = np.array([0.0, 0.0, 0.0])
+        omega = np.array([0.0, 0.0, 0.0])
+        p_corr = rolling_shutter_correct_point(p, v, omega, 0.01)
+        np.testing.assert_allclose(p_corr, p, atol=1e-12)
+
+    def test_pure_linear_velocity(self):
+        """Pure translation: p_corr = p - v * t."""
+        p = np.array([1.0, 0.0, 4.0])
+        v = np.array([2.0, 0.0, 0.0])
+        omega = np.array([0.0, 0.0, 0.0])
+        t = 0.01
+        p_corr = rolling_shutter_correct_point(p, v, omega, t)
+        np.testing.assert_allclose(p_corr, p - v * t, atol=1e-12)
+
+    def test_pure_angular_velocity(self):
+        """Pure rotation: p_corr = p - t * (omega x p)."""
+        p = np.array([0.0, 0.0, 5.0])
+        v = np.array([0.0, 0.0, 0.0])
+        omega = np.array([0.1, 0.0, 0.0])  # rotate around x
+        t = 0.02
+        p_corr = rolling_shutter_correct_point(p, v, omega, t)
+        expected = p - t * np.cross(omega, p)
+        np.testing.assert_allclose(p_corr, expected, atol=1e-12)
+
+    def test_invalid_shapes(self):
+        v = np.array([0.0, 0.0, 0.0])
+        omega = np.array([0.0, 0.0, 0.0])
+        with pytest.raises(ValueError, match="point_camera"):
+            rolling_shutter_correct_point(np.array([1.0, 2.0]), v, omega, 0.0)
+        with pytest.raises(ValueError, match="linear_velocity"):
+            rolling_shutter_correct_point(
+                np.array([1.0, 0.0, 2.0]), np.array([0.0, 0.0]), omega, 0.0
+            )
+        with pytest.raises(ValueError, match="angular_velocity"):
+            rolling_shutter_correct_point(
+                np.array([1.0, 0.0, 2.0]), v, np.array([0.0, 0.0]), 0.0
+            )
+
+
+class TestRollingShutterProjectPoint:
+    def setup_method(self):
+        self.K = camera_matrix(800.0, 800.0, 640.0, 360.0)
+        self.image_height = 720
+        self.no_velocity = np.zeros(3)
+
+    def test_zero_readout_matches_pinhole(self):
+        """Zero readout time must reproduce standard pinhole projection."""
+        pt = np.array([0.5, -0.3, 3.0])
+        u_rs, v_rs = rolling_shutter_project_point(
+            self.K, pt, self.no_velocity, self.no_velocity,
+            self.image_height, 0.0,
+        )
+        u_ph, v_ph = project_point(self.K, pt)
+        assert u_rs == pytest.approx(u_ph, rel=1e-6)
+        assert v_rs == pytest.approx(v_ph, rel=1e-6)
+
+    def test_zero_velocity_matches_pinhole(self):
+        """No camera motion must reproduce standard pinhole projection."""
+        pt = np.array([0.2, 0.1, 2.0])
+        u_rs, v_rs = rolling_shutter_project_point(
+            self.K, pt, self.no_velocity, self.no_velocity,
+            self.image_height, 0.033,
+        )
+        u_ph, v_ph = project_point(self.K, pt)
+        assert u_rs == pytest.approx(u_ph, rel=1e-6)
+        assert v_rs == pytest.approx(v_ph, rel=1e-6)
+
+    def test_lateral_velocity_shifts_pixel(self):
+        """Lateral camera motion should shift the projected pixel horizontally.
+
+        Point at [0, 0, 5] projects to the principal point (640, 360) without
+        motion.  A rightward camera velocity (vx = +1 m/s) makes the world
+        point appear to shift left (−u direction).  The expected displacement
+        is fx * vx * row_time / Z where row_time = (360 / 719) * 0.033.
+        """
+        pt = np.array([0.0, 0.0, 5.0])
+        # Camera moves right (+x) ⟹ world point appears to shift left (−u)
+        v_cam = np.array([1.0, 0.0, 0.0])
+        u_rs, v_rs = rolling_shutter_project_point(
+            self.K, pt, v_cam, self.no_velocity,
+            self.image_height, 0.033,
+        )
+        u_ph, v_ph = project_point(self.K, pt)
+        assert u_rs < u_ph  # shifted left relative to global-shutter projection
+        # Quantitative check: the on-axis point converges in one iteration.
+        # row_time = (v_ph / (image_height - 1)) * readout_time
+        expected_row_time = (v_ph / (self.image_height - 1)) * 0.033
+        expected_u = u_ph - 800.0 * (1.0 * expected_row_time) / pt[2]
+        assert u_rs == pytest.approx(expected_u, rel=1e-5)
+
+    def test_behind_camera_raises(self):
+        with pytest.raises(ValueError, match="behind"):
+            rolling_shutter_project_point(
+                self.K, [0.0, 0.0, -1.0], self.no_velocity, self.no_velocity,
+                self.image_height, 0.033,
+            )
+
+    def test_invalid_image_height(self):
+        with pytest.raises(ValueError, match="image_height"):
+            rolling_shutter_project_point(
+                self.K, [0.0, 0.0, 1.0], self.no_velocity, self.no_velocity,
+                1, 0.033,
+            )
+
+    def test_negative_readout_time_raises(self):
+        with pytest.raises(ValueError, match="readout_time"):
+            rolling_shutter_project_point(
+                self.K, [0.0, 0.0, 1.0], self.no_velocity, self.no_velocity,
+                self.image_height, -0.001,
+            )
+
+    def test_invalid_point_shape(self):
+        with pytest.raises(ValueError, match="shape"):
+            rolling_shutter_project_point(
+                self.K, [0.0, 1.0], self.no_velocity, self.no_velocity,
+                self.image_height, 0.033,
+            )
+
+    def test_with_distortion_zero_velocity_matches_distorted_pinhole(self):
+        """With no motion, RS projection should equal distorted pinhole projection."""
+        dist = (-0.3, 0.1, 0.001, -0.001, 0.0)
+        pt = np.array([0.3, -0.2, 2.0])
+        u_rs, v_rs = rolling_shutter_project_point(
+            self.K, pt, self.no_velocity, self.no_velocity,
+            self.image_height, 0.033, dist_coeffs=dist,
+        )
+        # Reference: apply distortion manually
+        fx, fy, cx, cy = 800.0, 800.0, 640.0, 360.0
+        x_n, y_n = pt[0] / pt[2], pt[1] / pt[2]
+        x_d, y_d = distort_point(np.array([x_n, y_n]), dist)
+        u_ref = fx * x_d + cx
+        v_ref = fy * y_d + cy
+        assert u_rs == pytest.approx(u_ref, rel=1e-5)
+        assert v_rs == pytest.approx(v_ref, rel=1e-5)
