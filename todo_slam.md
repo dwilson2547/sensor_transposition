@@ -170,7 +170,7 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 
 ### Blocking / High Priority
 - [X] Fisheye/omnidirectional camera model (Kannala–Brandt)
-- [ ] Multi-sensor time synchronisation / interpolation utilities
+- [X] Multi-sensor time synchronisation / interpolation utilities
 - [ ] ROS launch/parameter files for cameras, GPS, IMU, and radar
 - [ ] GPS/RTK driver integration and ECEF/ENU/UTM conversion
 - [ ] IMU pre-integration
