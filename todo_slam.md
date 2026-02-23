@@ -43,7 +43,7 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 | Time-offset (temporal extrinsic) calibration between sensors | High | Hardware-timestamped sensors may have a fixed clock offset; there is no field or utility for this in `SensorCollection`. |
 | Camera-LiDAR target-based extrinsic calibration tooling | Medium | The library stores calibration results but provides no workflow (e.g., checkerboard or ArUco target detection) to compute them. `docs/camera_intrinsics_guide.md` covers intrinsics only. |
 | IMU-to-vehicle extrinsic + bias/scale calibration | Medium | `SensorCollection` stores IMU extrinsics but there is no IMU calibration or noise-model field (Allan-variance parameters). |
-| Rolling-shutter model for cameras | Medium | High-speed cameras used in SLAM often have a rolling shutter; no model or correction exists. |
+| Rolling-shutter model for cameras | Medium | High-speed cameras used in SLAM often have a rolling shutter; first-order correction implemented in `camera_intrinsics.py`. |
 
 ---
 
@@ -187,7 +187,7 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 - [ ] Temporal extrinsic (clock-offset) calibration field in `SensorCollection`
 - [ ] Camera-LiDAR target-based extrinsic calibration workflow
 - [ ] IMU noise model / Allan-variance parameters in `SensorCollection`
-- [ ] Rolling-shutter camera model and correction
+- [X] Rolling-shutter camera model and correction
 - [ ] IMU and radar ROS driver examples
 - [ ] Rosbag / MCAP recording and playback utilities
 - [ ] Data capture and intrinsic calculation guide
