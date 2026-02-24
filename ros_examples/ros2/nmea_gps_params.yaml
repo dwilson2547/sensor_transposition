@@ -1,0 +1,32 @@
+# ROS 2 parameter file for the NMEA GPS/GNSS driver
+#
+# Package  : nmea_navsat_driver (ROS 2 port)
+# Install  : sudo apt install ros-<distro>-nmea-navsat-driver
+# Source   : https://github.com/ros-drivers/nmea_navsat_driver/tree/ros2
+#
+# Compatible with any receiver that outputs NMEA 0183 sentences over a serial
+# port: u-blox, Trimble, NovAtel, Septentrio, generic USB GPS dongles.
+#
+# Usage:
+#   ros2 launch nmea_navsat_driver nmea_serial_driver.launch.py \
+#       params_file:=<path-to-this-file>
+#
+# Topics published:
+#   /fix                sensor_msgs/msg/NavSatFix      (lat, lon, alt, covariance)
+#   /vel                geometry_msgs/msg/TwistStamped (velocity from RMC/VTG)
+#   /time_reference     sensor_msgs/msg/TimeReference  (GPS UTC time)
+
+nmea_navsat_driver:
+  ros__parameters:
+    # --- Serial port ---
+    port: "/dev/ttyUSB0"         # Serial device; adjust to match your system
+    baud: 115200                 # Baud rate: 4800 | 9600 | 38400 | 57600 | 115200
+
+    # --- TF / frame ---
+    frame_id: "gps_link"         # TF frame attached to the GPS antenna phase centre
+    time_ref_source: "gps"       # Label placed in sensor_msgs/TimeReference.source
+
+    # --- Sentence handling ---
+    # false = use GGA + VTG (provides HDOP covariance estimate)
+    # true  = use RMC only  (position covariance set to unknown)
+    useRMC: false

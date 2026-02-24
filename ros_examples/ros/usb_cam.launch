@@ -1,0 +1,44 @@
+<!-- ROS 1 launch file for USB cameras (usb_cam driver)
+     Requires: usb_cam package
+     Install:  sudo apt install ros-<distro>-usb-cam
+-->
+<launch>
+  <!-- Device -->
+  <arg name="video_device"  default="/dev/video0"
+       doc="V4L2 device path (check with ls /dev/video*)" />
+  <arg name="camera_name"   default="usb_cam"
+       doc="Logical name for this camera; used as namespace and TF frame prefix" />
+  <arg name="frame_id"      default="camera"
+       doc="TF frame attached to the optical centre of the camera" />
+
+  <!-- Image settings -->
+  <arg name="image_width"   default="1280" doc="Capture width in pixels" />
+  <arg name="image_height"  default="720"  doc="Capture height in pixels" />
+  <arg name="framerate"     default="30"   doc="Target frame rate (fps)" />
+  <arg name="pixel_format"  default="yuyv"
+       doc="V4L2 pixel format: yuyv | mjpeg | rgb24 | grey" />
+
+  <!-- Calibration -->
+  <arg name="camera_info_url" default=""
+       doc="file:///path/to/camera_info.yaml — leave empty to skip loading" />
+  <arg name="autofocus"     default="false" doc="Enable V4L2 autofocus (if supported)" />
+
+  <!-- usb_cam driver node
+       Publishes:
+         /<camera_name>/image_raw          sensor_msgs/Image
+         /<camera_name>/camera_info        sensor_msgs/CameraInfo
+  -->
+  <node name="usb_cam_node" pkg="usb_cam" type="usb_cam_node"
+        ns="$(arg camera_name)" output="screen">
+    <param name="video_device"      value="$(arg video_device)" />
+    <param name="camera_name"       value="$(arg camera_name)" />
+    <param name="camera_frame_id"   value="$(arg frame_id)" />
+    <param name="image_width"       value="$(arg image_width)" />
+    <param name="image_height"      value="$(arg image_height)" />
+    <param name="framerate"         value="$(arg framerate)" />
+    <param name="pixel_format"      value="$(arg pixel_format)" />
+    <param name="camera_info_url"   value="$(arg camera_info_url)" />
+    <param name="autofocus"         value="$(arg autofocus)" />
+    <param name="io_method"         value="mmap" />
+  </node>
+</launch>

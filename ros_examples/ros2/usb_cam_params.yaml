@@ -1,0 +1,46 @@
+# ROS 2 parameter file for the usb_cam driver
+#
+# Package  : usb_cam
+# Install  : sudo apt install ros-<distro>-usb-cam
+#
+# Usage:
+#   ros2 launch usb_cam camera.launch.py \
+#       params_file:=<path-to-this-file>
+#
+# Supported transports: raw (sensor_msgs/Image), compressed, theora
+# Install image-transport plugins:
+#   sudo apt install ros-<distro>-image-transport-plugins
+
+usb_cam:
+  ros__parameters:
+    # --- Device ---
+    video_device: "/dev/video0"     # V4L2 device path (check with ls /dev/video*)
+    camera_name: "usb_cam"          # Logical name; used as topic namespace
+
+    # --- Image format ---
+    image_width: 1280               # Capture width in pixels
+    image_height: 720               # Capture height in pixels
+    framerate: 30.0                 # Target frame rate (fps)
+    pixel_format: "yuyv"            # V4L2 pixel format: yuyv | mjpeg | rgb24 | grey
+    io_method: "mmap"               # I/O method: mmap | read | userptr
+
+    # --- TF frame ---
+    camera_frame_id: "camera"       # TF frame for the optical centre
+
+    # --- Calibration ---
+    # Provide a file:// URI to a camera_info YAML produced by
+    # ros2 run camera_calibration cameracalibrator; leave empty to skip.
+    camera_info_url: ""
+
+    # --- Exposure / focus ---
+    brightness: -1                  # -1 = auto; 0–255 for manual
+    contrast: -1                    # -1 = auto
+    saturation: -1                  # -1 = auto
+    sharpness: -1                   # -1 = auto
+    gain: -1                        # -1 = auto
+    auto_white_balance: true
+    white_balance: 4000             # Colour temperature (K); only used when auto_white_balance=false
+    autoexposure: true
+    exposure: 100                   # Only used when autoexposure=false
+    autofocus: false
+    focus: -1                       # Only used when autofocus=false

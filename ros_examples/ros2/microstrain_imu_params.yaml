@@ -1,0 +1,47 @@
+# ROS 2 parameter file for the MicroStrain 3DM IMU driver
+#
+# Package  : microstrain_inertial_driver (ROS 2)
+# Source   : https://github.com/LORD-MicroStrain/microstrain_inertial
+# Install  : clone into your ROS 2 workspace and build with colcon
+#   cd ~/ros2_ws/src
+#   git clone https://github.com/LORD-MicroStrain/microstrain_inertial.git
+#   cd ~/ros2_ws && colcon build --packages-up-to microstrain_inertial_driver
+#
+# Supported devices : 3DM-GX5-10/25/35/45, 3DM-CV5-10/25/45, 3DM-GQ7
+#
+# Usage:
+#   ros2 launch microstrain_inertial_driver microstrain_launch.py \
+#       params_file:=<path-to-this-file>
+#
+# Topics published:
+#   /imu/data       sensor_msgs/msg/Imu            (orientation, gyro, accel)
+#   /imu/data_raw   sensor_msgs/msg/Imu            (gyro + accel, no orientation)
+#   /imu/mag        sensor_msgs/msg/MagneticField  (magnetometer, if available)
+
+microstrain_inertial_driver:
+  ros__parameters:
+    # --- Connection ---
+    port: "/dev/ttyACM0"         # Serial port (use ls /dev/ttyACM* or /dev/ttyUSB*)
+    baudrate: 115200             # Must match the firmware configuration
+
+    # --- TF frame ---
+    imu_frame_id: "imu_link"     # TF frame attached to the IMU body
+
+    # --- Output rates (Hz) ---
+    imu_data_rate: 100           # IMU publish rate (max 500 Hz for GX5 models)
+    mag_data_rate: 10            # Magnetometer rate (if publish_mag = true)
+    filter_data_rate: 100        # On-device filter output rate (if enable_filter = true)
+
+    # --- Axes convention ---
+    # true  = publish in ENU (East-North-Up) — ROS standard (REP-145)
+    # false = publish in NED (North-East-Down) — sensor-native
+    use_enu_frame: true
+
+    # --- Published data ---
+    publish_imu: true
+    publish_mag: true            # Set to false if the sensor has no magnetometer
+
+    # --- On-device Kalman filter (3DM-GX5-45 / GQ7 only) ---
+    # Fuses IMU + magnetometer on the device; outputs orientation in /imu/data.
+    # Leave false for entry-level devices — use imu_filter_madgwick in that case.
+    filter_enable_imu_rate: false

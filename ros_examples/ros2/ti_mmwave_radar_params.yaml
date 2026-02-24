@@ -1,0 +1,41 @@
+# ROS 2 parameter file for the TI mmWave radar driver
+#
+# Package  : ti_mmwave_rospkg (ROS 2 port)
+# Source   : https://github.com/radar-lab/ti_mmwave_rospkg
+# Install  : clone into your ROS 2 workspace and build with colcon
+#   cd ~/ros2_ws/src
+#   git clone https://github.com/radar-lab/ti_mmwave_rospkg.git
+#   cd ~/ros2_ws && colcon build --packages-up-to ti_mmwave_rospkg
+#
+# Supported devices : AWR1843, IWR6843, AWR2944 (EVM and custom boards)
+#
+# Usage:
+#   ros2 launch ti_mmwave_rospkg ti_mmwave_launch.py \
+#       params_file:=<path-to-this-file>
+#
+# Topics published:
+#   /ti_mmwave/radar_scan   sensor_msgs/msg/PointCloud2
+#       Fields: x, y, z (m), velocity (m/s), intensity (SNR / RCS)
+
+ti_mmwave_rospkg:
+  ros__parameters:
+    # --- Serial ports ---
+    command_port: "/dev/ttyACM0"   # Control / CLI port (configuration interface)
+    command_rate: 115200           # Baud rate for command port
+    data_port: "/dev/ttyACM1"     # Data port (raw radar frames)
+    data_rate: 921600              # Baud rate for data port
+
+    # --- Chirp profile ---
+    # Absolute path to a mmWave SDK chirp-configuration file (.cfg).
+    # Example profiles are shipped with the package under its cfg/ directory.
+    # Replace with the full path on your system, e.g.:
+    #   /opt/ros/<distro>/share/ti_mmwave_rospkg/cfg/1843_multi_3d_0.cfg
+    cfg_file: "/path/to/ti_mmwave_rospkg/cfg/1843_multi_3d_0.cfg"
+
+    # --- TF frame ---
+    frame_id: "ti_mmwave_0"        # TF frame attached to the radar (FLU convention)
+
+    # --- Detection gates ---
+    # Detections outside these angular limits are discarded before publishing.
+    max_allowed_elevation_angle_deg: 90.0   # ±elevation gate in degrees
+    max_allowed_azimuth_angle_deg: 90.0     # ±azimuth gate in degrees

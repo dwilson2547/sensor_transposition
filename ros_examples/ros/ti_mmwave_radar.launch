@@ -1,0 +1,43 @@
+<!-- ROS 1 launch file for TI mmWave radar (AWR1843 / IWR6843 / AWR2944)
+     Requires: ti_mmwave_rospkg package
+     Install:  https://github.com/radar-lab/ti_mmwave_rospkg
+               (clone into catkin_ws/src and catkin_make)
+-->
+<launch>
+  <!-- Serial ports -->
+  <arg name="command_port" default="/dev/ttyACM0"
+       doc="Control serial port (CLI / configuration interface)" />
+  <arg name="data_port"    default="/dev/ttyACM1"
+       doc="Data serial port (raw radar frames)" />
+  <arg name="command_rate" default="115200" doc="Baud rate for command port" />
+  <arg name="data_rate"    default="921600" doc="Baud rate for data port" />
+
+  <!-- Sensor profile -->
+  <arg name="cfg_file"     default="$(find ti_mmwave_rospkg)/cfg/1843_multi_3d_0.cfg"
+       doc="Path to a mmWave SDK chirp-profile configuration file (.cfg)" />
+  <arg name="frame_id"     default="ti_mmwave_0"
+       doc="TF frame attached to the radar (FLU convention)" />
+  <arg name="max_allowed_elevation_angle_deg" default="90"
+       doc="Elevation angle gate — detections outside this range are discarded" />
+  <arg name="max_allowed_azimuth_angle_deg"   default="90"
+       doc="Azimuth angle gate — detections outside this range are discarded" />
+
+  <!-- TI mmWave driver node
+       Publishes:
+         /ti_mmwave/radar_scan   sensor_msgs/PointCloud2
+             Fields: x, y, z (m), velocity (m/s), intensity (SNR / RCS)
+  -->
+  <node name="ti_mmwave_node" pkg="ti_mmwave_rospkg"
+        type="ti_mmwave_rospkg" output="screen">
+    <param name="command_port"    value="$(arg command_port)" />
+    <param name="command_rate"    value="$(arg command_rate)" />
+    <param name="data_port"       value="$(arg data_port)" />
+    <param name="data_rate"       value="$(arg data_rate)" />
+    <param name="cfg_file"        value="$(arg cfg_file)" />
+    <param name="frame_id"        value="$(arg frame_id)" />
+    <param name="max_allowed_elevation_angle_deg"
+                                  value="$(arg max_allowed_elevation_angle_deg)" />
+    <param name="max_allowed_azimuth_angle_deg"
+                                  value="$(arg max_allowed_azimuth_angle_deg)" />
+  </node>
+</launch>

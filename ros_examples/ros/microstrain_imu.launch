@@ -1,0 +1,45 @@
+<!-- ROS 1 launch file for MicroStrain 3DM IMU series (GX5, CV5, GQ7, …)
+     Requires: microstrain_inertial_driver package
+     Install:  https://github.com/LORD-MicroStrain/microstrain_inertial
+               (clone into catkin_ws/src and catkin_make)
+-->
+<launch>
+  <!-- Serial port / connection -->
+  <arg name="port"         default="/dev/ttyACM0"
+       doc="Serial device connected to the IMU (use ls /dev/ttyACM* or /dev/ttyUSB*)" />
+  <arg name="baudrate"     default="115200"
+       doc="Serial baud rate matching the device firmware setting" />
+
+  <!-- Sensor operation -->
+  <arg name="imu_rate"     default="100"
+       doc="IMU output data rate in Hz (max depends on model: 500 Hz for GX5)" />
+  <arg name="frame_id"     default="imu_link"
+       doc="TF frame attached to the IMU body" />
+
+  <!-- Filter -->
+  <arg name="use_enu_frame"       default="true"
+       doc="true = publish in ENU (ROS standard); false = NED" />
+  <arg name="publish_imu"         default="true" />
+  <arg name="publish_mag"         default="true"
+       doc="Publish magnetometer data on /imu/mag (if sensor supports it)" />
+  <arg name="enable_filter"       default="false"
+       doc="Enable the on-device Kalman filter (GQ7 / 3DM-GX5-45 and above)" />
+
+  <!-- MicroStrain driver node
+       Publishes:
+         /imu/data       sensor_msgs/Imu            (orientation, gyro, accel)
+         /imu/data_raw   sensor_msgs/Imu            (gyro + accel only)
+         /imu/mag        sensor_msgs/MagneticField  (magnetometer, if enabled)
+  -->
+  <node name="microstrain_imu_node" pkg="microstrain_inertial_driver"
+        type="microstrain_inertial_driver_node" output="screen">
+    <param name="port"                    value="$(arg port)" />
+    <param name="baudrate"                value="$(arg baudrate)" />
+    <param name="imu_frame_id"            value="$(arg frame_id)" />
+    <param name="imu_data_rate"           value="$(arg imu_rate)" />
+    <param name="use_enu_frame"           value="$(arg use_enu_frame)" />
+    <param name="publish_imu"             value="$(arg publish_imu)" />
+    <param name="publish_mag"             value="$(arg publish_mag)" />
+    <param name="filter_enable_imu_rate"  value="$(arg enable_filter)" />
+  </node>
+</launch>
