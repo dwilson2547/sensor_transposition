@@ -17,7 +17,7 @@ This document analyses the current `sensor_transposition` toolset and identifies
 | IMU binary parser (32-byte and 48-byte records) | `imu/imu.py` | ✅ Complete |
 | Radar binary parser (spherical → Cartesian) | `radar/radar.py` | ✅ Complete |
 | Trajectory storage (`FramePose`, `FramePoseSequence`, YAML I/O) | `frame_pose.py` | ✅ Complete |
-| ROS 1 & 2 launch/parameter files for Velodyne and Ouster | `ros_examples/` | ✅ Complete |
+| ROS 1 & 2 launch/parameter files for LiDAR, camera, GPS, IMU, and radar sensors | `ros_examples/` | ✅ Complete |
 | Calibration and data-collection documentation | `docs/` | ✅ Partial |
 
 ---
@@ -58,7 +58,7 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 | Gap | Priority | Notes |
 |-----|----------|-------|
 | Multi-sensor time synchronisation / interpolation | High | No utility to align data from different sensors to a common timeline. Needed before any sensor-fusion step. |
-| ROS launch/parameter files for cameras, GPS, IMU, and radar | High | Only LiDAR ROS examples exist. Noted in `TODO.md`. |
+| ROS launch/parameter files for cameras, GPS, IMU, and radar | High | ✅ Added ROS 1 launch files and ROS 2 parameter files for USB camera (`usb_cam`), NMEA GPS, MicroStrain IMU, and TI mmWave radar in `ros_examples/`. |
 | GPS / GNSS ROS driver integration and RTK setup guide | High | `gps/nmea.py` parses log files but there is no live-driver config or RTK correction pipeline. Noted in `TODO.md`. |
 | IMU ROS driver integration | Medium | Parsing works on offline files; no ROS node config or live-streaming example. Noted in `TODO.md`. |
 | Radar ROS driver integration | Medium | Same situation as IMU. Noted in `TODO.md`. |
@@ -171,7 +171,7 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 ### Blocking / High Priority
 - [X] Fisheye/omnidirectional camera model (Kannala–Brandt)
 - [X] Multi-sensor time synchronisation / interpolation utilities
-- [ ] ROS launch/parameter files for cameras, GPS, IMU, and radar
+- [X] ROS launch/parameter files for cameras, GPS, IMU, and radar
 - [ ] GPS/RTK driver integration and ECEF/ENU/UTM conversion
 - [ ] IMU pre-integration
 - [ ] LiDAR odometry / scan matching (ICP, NDT; Kiss-ICP integration)

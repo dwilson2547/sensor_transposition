@@ -1,0 +1,35 @@
+<!-- ROS 1 launch file for generic NMEA GPS/GNSS receivers
+     Requires: nmea_navsat_driver package
+     Install:  sudo apt install ros-<distro>-nmea-navsat-driver
+     Also works with u-blox, Trimble, NovAtel, and Septentrio receivers
+     that output standard NMEA 0183 sentences over a serial port.
+-->
+<launch>
+  <!-- Serial port -->
+  <arg name="port"  default="/dev/ttyUSB0"
+       doc="Serial device connected to the GPS receiver" />
+  <arg name="baud"  default="115200"
+       doc="Baud rate: 4800 | 9600 | 38400 | 57600 | 115200" />
+
+  <!-- Frame settings -->
+  <arg name="frame_id" default="gps_link"
+       doc="TF frame attached to the GPS antenna phase centre" />
+  <arg name="time_ref_source" default="gps"
+       doc="Source label used in sensor_msgs/TimeReference" />
+
+  <!-- NMEA driver node
+       Publishes:
+         /fix               sensor_msgs/NavSatFix   (lat, lon, alt, covariance)
+         /vel               geometry_msgs/TwistStamped   (velocity from RMC)
+         /time_reference    sensor_msgs/TimeReference    (GPS UTC time)
+  -->
+  <node name="nmea_serial_driver" pkg="nmea_navsat_driver"
+        type="nmea_serial_driver" output="screen">
+    <param name="port"            value="$(arg port)" />
+    <param name="baud"            value="$(arg baud)" />
+    <param name="frame_id"        value="$(arg frame_id)" />
+    <param name="time_ref_source" value="$(arg time_ref_source)" />
+    <param name="useRMC"          value="false"
+           doc="false = use GGA+VTG; true = use RMC only (no covariance)" />
+  </node>
+</launch>
