@@ -17,6 +17,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
   - [LiDAR–Camera Fusion](#lidar-camera-fusion)
   - [LiDAR Parsers](#lidar-parsers)
   - [GPS / GNSS](#gps--gnss)
+  - [GPS Coordinate-Frame Converter](#gps-coordinate-frame-converter)
   - [IMU](#imu)
   - [Radar](#radar)
 - [Configuration Example](#configuration-example)
@@ -32,7 +33,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
 - **Homogeneous transforms** – composable 4×4 `Transform` objects with helpers for building from quaternions or rotation matrices, inverting, and applying to point clouds.
 - **LiDAR–camera fusion** – project 3-D LiDAR point clouds onto a camera image plane and colour the cloud by sampling pixel values.
 - **LiDAR parsers** – binary readers for Velodyne (KITTI `.bin`), Ouster (4-column and 8-column `.bin`), and Livox (LVX / LVX2) file formats.
-- **GPS / GNSS** – NMEA 0183 parser supporting GGA and RMC sentence types.
+- **GPS / GNSS** – NMEA 0183 parser supporting GGA and RMC sentence types, plus a coordinate-frame converter for ECEF ↔ ENU and geodetic ↔ UTM conversions.
 - **IMU** – binary parser for 32-byte (accel + gyro) and 48-byte (accel + gyro + quaternion) records.
 - **Radar** – binary parser for 5-field (range, azimuth, elevation, velocity, SNR) detection records with spherical → Cartesian conversion.
 - **ROS examples** – ready-to-use launch / parameter files for Velodyne and Ouster LiDARs in both ROS 1 and ROS 2.
@@ -309,6 +310,63 @@ rmc_fixes = parser.rmc_fixes()
 
 # One-liner
 records = load_nmea("gps_log.nmea")
+```
+
+---
+
+### GPS Coordinate-Frame Converter
+
+Convert raw GPS latitude / longitude / altitude into local Cartesian frames
+needed for SLAM initialisation, global constraints, or sensor-fusion.
+
+#### ECEF ↔ Geodetic
+
+```python
+from sensor_transposition.gps.converter import geodetic_to_ecef, ecef_to_geodetic
+
+# Geodetic (lat/lon/alt) → ECEF Cartesian
+X, Y, Z = geodetic_to_ecef(lat_deg=51.5074, lon_deg=-0.1278, alt_m=11.0)
+
+# ECEF → Geodetic
+lat, lon, alt = ecef_to_geodetic(X, Y, Z)
+```
+
+#### ECEF / Geodetic ↔ ENU (local tangent plane)
+
+```python
+from sensor_transposition.gps.converter import (
+    ecef_to_enu,
+    enu_to_ecef,
+    geodetic_to_enu,
+)
+
+# Define a local ENU origin (e.g. the first GPS fix)
+lat0, lon0, alt0 = 51.5074, -0.1278, 11.0
+
+# Geodetic → ENU (convenience wrapper)
+east, north, up = geodetic_to_enu(
+    lat_deg=51.5075, lon_deg=-0.1279, alt_m=11.0,
+    lat0_deg=lat0, lon0_deg=lon0, alt0_m=alt0,
+)
+
+# ECEF → ENU
+east, north, up = ecef_to_enu(X, Y, Z, lat0, lon0, alt0)
+
+# ENU → ECEF (inversion)
+X2, Y2, Z2 = enu_to_ecef(east, north, up, lat0, lon0, alt0)
+```
+
+#### Geodetic ↔ UTM
+
+```python
+from sensor_transposition.gps.converter import geodetic_to_utm, utm_to_geodetic
+
+# Geodetic → UTM
+easting, northing, zone_number, zone_letter = geodetic_to_utm(51.5074, -0.1278)
+# → (699_330.6, 5_710_155.4, 30, 'U')
+
+# UTM → Geodetic
+lat, lon = utm_to_geodetic(easting, northing, zone_number, zone_letter)
 ```
 
 ---

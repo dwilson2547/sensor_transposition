@@ -14,6 +14,7 @@ This document analyses the current `sensor_transposition` toolset and identifies
 | LiDAR–camera projection and point-cloud colouring | `lidar_camera.py` | ✅ Complete |
 | LiDAR binary parsers (Velodyne KITTI, Ouster 4/8-col, Livox LVX/LVX2) | `lidar/` | ✅ Complete |
 | NMEA 0183 GPS parser (GGA, RMC) | `gps/nmea.py` | ✅ Complete |
+| GPS coordinate-frame converter (ECEF ↔ ENU / UTM) | `gps/converter.py` | ✅ Complete |
 | IMU binary parser (32-byte and 48-byte records) | `imu/imu.py` | ✅ Complete |
 | Radar binary parser (spherical → Cartesian) | `radar/radar.py` | ✅ Complete |
 | Trajectory storage (`FramePose`, `FramePoseSequence`, YAML I/O) | `frame_pose.py` | ✅ Complete |
@@ -81,7 +82,7 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 | IMU pre-integration | High | Needed for high-rate relative-pose prediction between LiDAR/camera frames, and for IMU-LiDAR tight coupling. |
 | Visual odometry (feature tracking / direct methods) | High | No optical flow, ORB/SIFT keypoint extraction, essential-matrix estimation, or PnP solver. |
 | Wheel odometry / vehicle kinematic model | Medium | No differential-drive or Ackermann model for dead-reckoning between frames. |
-| GPS-to-local-frame converter (ECEF ↔ ENU / UTM) | Medium | `gps/nmea.py` returns raw latitude/longitude/altitude but provides no conversion to a local Cartesian frame needed for initialisation or global constraints. |
+| GPS-to-local-frame converter (ECEF ↔ ENU / UTM) | Medium | ✅ Added `gps/converter.py` with `geodetic_to_ecef`, `ecef_to_geodetic`, `ecef_to_enu`, `enu_to_ecef`, `geodetic_to_enu`, `geodetic_to_utm`, and `utm_to_geodetic`. |
 
 ---
 
@@ -172,7 +173,7 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 - [X] Fisheye/omnidirectional camera model (Kannala–Brandt)
 - [X] Multi-sensor time synchronisation / interpolation utilities
 - [X] ROS launch/parameter files for cameras, GPS, IMU, and radar
-- [ ] GPS/RTK driver integration and ECEF/ENU/UTM conversion
+- [X] GPS/RTK driver integration and ECEF/ENU/UTM conversion
 - [X] IMU pre-integration
 - [ ] LiDAR odometry / scan matching (ICP, NDT; Kiss-ICP integration)
 - [ ] Visual odometry (feature tracking, essential matrix, PnP)
