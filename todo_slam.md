@@ -173,7 +173,7 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 - [X] Multi-sensor time synchronisation / interpolation utilities
 - [X] ROS launch/parameter files for cameras, GPS, IMU, and radar
 - [ ] GPS/RTK driver integration and ECEF/ENU/UTM conversion
-- [ ] IMU pre-integration
+- [X] IMU pre-integration
 - [ ] LiDAR odometry / scan matching (ICP, NDT; Kiss-ICP integration)
 - [ ] Visual odometry (feature tracking, essential matrix, PnP)
 - [ ] Place recognition / loop closure detection
