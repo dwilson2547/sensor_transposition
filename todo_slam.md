@@ -10,16 +10,18 @@ This document analyses the current `sensor_transposition` toolset and identifies
 |------|-----------|--------|
 | Multi-sensor rig configuration (YAML I/O) | `sensor_collection.py` | ✅ Complete |
 | Homogeneous transform math (4×4, compose, invert, apply) | `transform.py` | ✅ Complete |
-| Pinhole camera model (focal length, projection, Brown–Conrady distortion) | `camera_intrinsics.py` | ✅ Complete |
+| Pinhole camera model (focal length, projection, Brown–Conrady distortion) and fisheye / omnidirectional model (Kannala-Brandt, equidistant, FOV up to 360°) | `camera_intrinsics.py` | ✅ Complete |
 | LiDAR–camera projection and point-cloud colouring | `lidar_camera.py` | ✅ Complete |
 | LiDAR binary parsers (Velodyne KITTI, Ouster 4/8-col, Livox LVX/LVX2) | `lidar/` | ✅ Complete |
 | NMEA 0183 GPS parser (GGA, RMC) | `gps/nmea.py` | ✅ Complete |
 | GPS coordinate-frame converter (ECEF ↔ ENU / UTM) | `gps/converter.py` | ✅ Complete |
 | IMU binary parser (32-byte and 48-byte records) | `imu/imu.py` | ✅ Complete |
+| IMU pre-integration (ΔR, Δv, Δp via midpoint method) | `imu/preintegration.py` | ✅ Complete |
 | Radar binary parser (spherical → Cartesian) | `radar/radar.py` | ✅ Complete |
 | Trajectory storage (`FramePose`, `FramePoseSequence`, YAML I/O) | `frame_pose.py` | ✅ Complete |
+| Multi-sensor time synchronisation and interpolation | `sync.py` | ✅ Complete |
 | ROS 1 & 2 launch/parameter files for LiDAR, camera, GPS, IMU, and radar sensors | `ros_examples/` | ✅ Complete |
-| Calibration and data-collection documentation | `docs/` | ✅ Partial |
+| Calibration and data-collection documentation | `docs/` | ✅ Complete |
 
 ---
 
@@ -40,11 +42,11 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 
 | Gap | Priority | Notes |
 |-----|----------|-------|
-| Fisheye / omnidirectional camera model (Kannala–Brandt / equidistant) | High | Wide-angle and 270° fisheye lenses are common in automotive SLAM; the pinhole model is insufficient at large FOVs. Noted in `TODO.md`. |
-| Time-offset (temporal extrinsic) calibration between sensors | High | Hardware-timestamped sensors may have a fixed clock offset; there is no field or utility for this in `SensorCollection`. |
-| Camera-LiDAR target-based extrinsic calibration tooling | Medium | The library stores calibration results but provides no workflow (e.g., checkerboard or ArUco target detection) to compute them. `docs/camera_intrinsics_guide.md` covers intrinsics only. |
-| IMU-to-vehicle extrinsic + bias/scale calibration | Medium | `SensorCollection` stores IMU extrinsics but there is no IMU calibration or noise-model field (Allan-variance parameters). |
-| Rolling-shutter model for cameras | Medium | High-speed cameras used in SLAM often have a rolling shutter; first-order correction implemented in `camera_intrinsics.py`. |
+| Fisheye / omnidirectional camera model (Kannala–Brandt / equidistant) | High | ✅ Added `fisheye_focal_length_from_fov`, `fisheye_distort_point`, `fisheye_undistort_point`, `fisheye_project_point`, and `fisheye_unproject_pixel` to `camera_intrinsics.py`; supports FOV up to 360°. |
+| Time-offset (temporal extrinsic) calibration between sensors | High | ✅ Added `time_offset_sec` field to `Sensor` and `time_offset_between()` to `SensorCollection`; `sync.py` applies the offset when aligning streams. |
+| Camera-LiDAR target-based extrinsic calibration tooling | Medium | ✅ Added `docs/camera_lidar_extrinsic_calibration.md` with a full checkerboard/ArUco-target workflow for computing and saving the extrinsic transform. |
+| IMU-to-vehicle extrinsic + bias/scale calibration | Medium | ✅ Added `ImuParameters` dataclass to `SensorCollection` with Allan-variance noise-density and random-walk fields, plus calibrated bias and scale-factor vectors. |
+| Rolling-shutter model for cameras | Medium | ✅ Added `rolling_shutter_row_time`, `rolling_shutter_correct_point`, and `rolling_shutter_project_point` to `camera_intrinsics.py`; first-order constant-velocity correction with fixed-point iteration for row convergence. |
 
 ---
 
@@ -58,13 +60,13 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 
 | Gap | Priority | Notes |
 |-----|----------|-------|
-| Multi-sensor time synchronisation / interpolation | High | No utility to align data from different sensors to a common timeline. Needed before any sensor-fusion step. |
+| Multi-sensor time synchronisation / interpolation | High | ✅ Added `sync.py` with `SensorSynchroniser` class and standalone `apply_time_offset`, `find_nearest_indices`, and `interpolate_timestamps` helpers; integrates with `Sensor.time_offset_sec`. |
 | ROS launch/parameter files for cameras, GPS, IMU, and radar | High | ✅ Added ROS 1 launch files and ROS 2 parameter files for USB camera (`usb_cam`), NMEA GPS, MicroStrain IMU, and TI mmWave radar in `ros_examples/`. |
 | GPS / GNSS ROS driver integration and RTK setup guide | High | `gps/nmea.py` parses log files but there is no live-driver config or RTK correction pipeline. Noted in `TODO.md`. |
-| IMU ROS driver integration | Medium | Parsing works on offline files; no ROS node config or live-streaming example. Noted in `TODO.md`. |
-| Radar ROS driver integration | Medium | Same situation as IMU. Noted in `TODO.md`. |
+| IMU ROS driver integration | Medium | ✅ Added `ros_examples/ros/microstrain_imu.launch` (ROS 1) and `ros_examples/ros2/microstrain_imu_params.yaml` (ROS 2) for the MicroStrain IMU driver. |
+| Radar ROS driver integration | Medium | ✅ Added `ros_examples/ros/ti_mmwave_radar.launch` (ROS 1) and `ros_examples/ros2/ti_mmwave_radar_params.yaml` (ROS 2) for the TI mmWave radar driver. |
 | Rosbag / MCAP recording and playback utilities | Medium | No tooling to record or replay multi-sensor data in a ROS-compatible bag format. |
-| Data capture instructions and intrinsic calculation guide | Medium | Noted in `TODO.md`. |
+| Data capture instructions and intrinsic calculation guide | Medium | ✅ Added data collection guides in `docs/` for cameras (pinhole: `camera_intrinsics_guide.md`; fisheye: `fisheye_camera_intrinsics_guide.md`), GPS (`gps_data_collection.md`), LiDAR (`lidar_data_collection.md`), and radar (`radar_data_collection.md`). |
 
 ---
 
@@ -79,7 +81,7 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 | Gap | Priority | Notes |
 |-----|----------|-------|
 | LiDAR odometry / scan matching (ICP, NDT, or LOAM-style) | High | The most common front-end for outdoor SLAM. Kiss-ICP integration is noted in `TODO.md` but not yet implemented. |
-| IMU pre-integration | High | Needed for high-rate relative-pose prediction between LiDAR/camera frames, and for IMU-LiDAR tight coupling. |
+| IMU pre-integration | High | ✅ Added `imu/preintegration.py` with `ImuPreintegrator` class; uses midpoint (trapezoidal) method to accumulate ΔR, Δv, Δp between keyframe timestamps. |
 | Visual odometry (feature tracking / direct methods) | High | No optical flow, ORB/SIFT keypoint extraction, essential-matrix estimation, or PnP solver. |
 | Wheel odometry / vehicle kinematic model | Medium | No differential-drive or Ackermann model for dead-reckoning between frames. |
 | GPS-to-local-frame converter (ECEF ↔ ENU / UTM) | Medium | ✅ Added `gps/converter.py` with `geodetic_to_ecef`, `ecef_to_geodetic`, `ecef_to_enu`, `enu_to_ecef`, `geodetic_to_enu`, `geodetic_to_utm`, and `utm_to_geodetic`. |
@@ -185,13 +187,13 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 - [ ] Multi-sensor synchronised visualisation platform
 
 ### Medium Priority
-- [ ] Temporal extrinsic (clock-offset) calibration field in `SensorCollection`
-- [ ] Camera-LiDAR target-based extrinsic calibration workflow
-- [ ] IMU noise model / Allan-variance parameters in `SensorCollection`
+- [X] Temporal extrinsic (clock-offset) calibration field in `SensorCollection`
+- [X] Camera-LiDAR target-based extrinsic calibration workflow
+- [X] IMU noise model / Allan-variance parameters in `SensorCollection`
 - [X] Rolling-shutter camera model and correction
-- [ ] IMU and radar ROS driver examples
+- [X] IMU and radar ROS driver examples
 - [ ] Rosbag / MCAP recording and playback utilities
-- [ ] Data capture and intrinsic calculation guide
+- [X] Data capture and intrinsic calculation guide
 - [ ] Wheel odometry / vehicle kinematic model
 - [ ] LiDAR descriptor-based place recognition (Scan Context, M2DP)
 - [ ] GPS absolute-position fusion into local map
