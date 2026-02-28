@@ -144,7 +144,7 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 
 | Gap | Priority | Notes |
 |-----|----------|-------|
-| Accumulated point-cloud / surfel map | High | A basic coloured point-cloud map assembled from successive LiDAR scans. |
+| Accumulated point-cloud / surfel map | High | ✅ Added `point_cloud_map.py` with `PointCloudMap`; supports per-scan ego-to-world transform, optional per-point RGB colour (uint8 or float), FIFO `max_points` cap, and voxel-grid centroid downsampling. See `docs/point_cloud_map.md`. |
 | Occupancy grid (2-D or 3-D) | Medium | Required for path planning and obstacle avoidance. |
 | Voxel map / TSDF (TSDFusion, VDB, etc.) | Medium | Memory-efficient volumetric representation used for dense reconstruction. |
 | Map serialisation (PCD, PLY, or custom binary format) | Medium | No mechanism to save or load a built map. |
@@ -183,7 +183,7 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 - [X] EKF/UKF state estimator for IMU + odometry fusion
 - [X] IMU-LiDAR tightly coupled fusion (motion-distortion correction)
 - [X] Pose graph data structure and optimisation back-end (g2o / GTSAM / Ceres)
-- [ ] Accumulated point-cloud or surfel map output
+- [X] Accumulated point-cloud or surfel map output
 - [ ] Multi-sensor synchronised visualisation platform
 
 ### Medium Priority
