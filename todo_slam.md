@@ -97,8 +97,8 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 
 | Gap | Priority | Notes |
 |-----|----------|-------|
-| Place recognition / appearance-based descriptor (DBoW, NetVLAD, etc.) | High | Required to detect revisited locations and close loops. |
-| Geometry-based loop closure verification (ICP/NDT re-alignment) | High | After a candidate loop is found, a geometric check validates it before adding a constraint to the graph. |
+| Place recognition / appearance-based descriptor (DBoW, NetVLAD, etc.) | High | ✅ Added `loop_closure.py` with `compute_scan_context` (Scan Context polar-grid descriptor), `scan_context_distance` (rotation-invariant normalised cosine distance with column-shift search), and `ScanContextDatabase` (two-stage ring-key pre-filter + full descriptor search with exclusion window). Pure NumPy/SciPy; no additional dependencies. |
+| Geometry-based loop closure verification (ICP/NDT re-alignment) | High | ✅ Handled by the existing `lidar/scan_matching.py` `icp_align` function; after a loop candidate is found via `ScanContextDatabase.query`, callers pass the two point clouds to `icp_align` for geometric verification and edge estimation. |
 | LiDAR descriptor matching (Scan Context, M2DP, etc.) | Medium | LiDAR-based place recognition can complement or replace visual bag-of-words approaches. |
 
 ---
@@ -179,7 +179,7 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 - [X] IMU pre-integration
 - [X] LiDAR odometry / scan matching (ICP, NDT; Kiss-ICP integration)
 - [X] Visual odometry (feature tracking, essential matrix, PnP)
-- [ ] Place recognition / loop closure detection
+- [X] Place recognition / loop closure detection
 - [ ] EKF/UKF state estimator for IMU + odometry fusion
 - [ ] IMU-LiDAR tightly coupled fusion (motion-distortion correction)
 - [ ] Pose graph data structure and optimisation back-end (g2o / GTSAM / Ceres)
