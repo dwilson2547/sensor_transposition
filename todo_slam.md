@@ -83,7 +83,7 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 | LiDAR odometry / scan matching (ICP, NDT, or LOAM-style) | High | ✅ Added `lidar/scan_matching.py` with point-to-point ICP (`icp_align`) using the Kabsch SVD algorithm and a scipy KD-tree for nearest-neighbour search; supports max-correspondence distance filtering, an optional initial transform, and convergence tolerance. |
 | IMU pre-integration | High | ✅ Added `imu/preintegration.py` with `ImuPreintegrator` class; uses midpoint (trapezoidal) method to accumulate ΔR, Δv, Δp between keyframe timestamps. |
 | Visual odometry (feature tracking / direct methods) | High | ✅ Added `visual_odometry.py` with `estimate_essential_matrix` (normalised 8-point algorithm + RANSAC), `recover_pose_from_essential` (SVD decomposition + cheirality test), and `solve_pnp` (DLT + RANSAC); pure NumPy/SciPy implementation. |
-| Wheel odometry / vehicle kinematic model | Medium | No differential-drive or Ackermann model for dead-reckoning between frames. |
+| Wheel odometry / vehicle kinematic model | Medium | ✅ Added `wheel_odometry.py` with `DifferentialDriveOdometer` (midpoint integration from wheel speeds or encoder ticks) and `AckermannOdometer` (bicycle model from speed + steering angle); both produce an `OdometryResult` with SE(2) pose, 4×4 transform, duration, and sample count. Functional wrappers `integrate_differential_drive` and `integrate_ackermann` also provided. See `docs/wheel_odometry.md`. |
 | GPS-to-local-frame converter (ECEF ↔ ENU / UTM) | Medium | ✅ Added `gps/converter.py` with `geodetic_to_ecef`, `ecef_to_geodetic`, `ecef_to_enu`, `enu_to_ecef`, `geodetic_to_enu`, `geodetic_to_utm`, and `utm_to_geodetic`. |
 
 ---
@@ -194,7 +194,7 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 - [X] IMU and radar ROS driver examples
 - [X] Rosbag / MCAP recording and playback utilities
 - [X] Data capture and intrinsic calculation guide
-- [ ] Wheel odometry / vehicle kinematic model
+- [X] Wheel odometry / vehicle kinematic model
 - [ ] LiDAR descriptor-based place recognition (Scan Context, M2DP)
 - [ ] GPS absolute-position fusion into local map
 - [ ] Sliding-window / fixed-lag smoother for online SLAM

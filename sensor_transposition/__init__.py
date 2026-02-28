@@ -27,6 +27,7 @@ from sensor_transposition import pose_graph
 from sensor_transposition import point_cloud_map
 from sensor_transposition import visualisation
 from sensor_transposition import rosbag
+from sensor_transposition import wheel_odometry
 
 __all__ = [
     "SensorCollection",
@@ -56,4 +57,5 @@ __all__ = [
     "point_cloud_map",
     "visualisation",
     "rosbag",
+    "wheel_odometry",
 ]
