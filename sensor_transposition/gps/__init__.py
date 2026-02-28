@@ -21,6 +21,10 @@ from sensor_transposition.gps.converter import (
     utm_zone_number,
     utm_zone_letter,
 )
+from sensor_transposition.gps.fusion import (
+    GpsFuser,
+    hdop_to_noise,
+)
 
 __all__ = [
     "GgaFix",
@@ -36,4 +40,6 @@ __all__ = [
     "utm_to_geodetic",
     "utm_zone_number",
     "utm_zone_letter",
+    "GpsFuser",
+    "hdop_to_noise",
 ]
