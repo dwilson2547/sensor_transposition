@@ -25,6 +25,7 @@ from sensor_transposition import visual_odometry
 from sensor_transposition import loop_closure
 from sensor_transposition import pose_graph
 from sensor_transposition import point_cloud_map
+from sensor_transposition import visualisation
 
 __all__ = [
     "SensorCollection",
@@ -52,4 +53,5 @@ __all__ = [
     "loop_closure",
     "pose_graph",
     "point_cloud_map",
+    "visualisation",
 ]
