@@ -22,6 +22,7 @@ from sensor_transposition import imu
 from sensor_transposition import radar
 from sensor_transposition import sync
 from sensor_transposition import visual_odometry
+from sensor_transposition import loop_closure
 
 __all__ = [
     "SensorCollection",
@@ -46,4 +47,5 @@ __all__ = [
     "radar",
     "sync",
     "visual_odometry",
+    "loop_closure",
 ]
