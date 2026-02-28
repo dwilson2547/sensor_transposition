@@ -29,6 +29,7 @@ from sensor_transposition import visualisation
 from sensor_transposition import rosbag
 from sensor_transposition import wheel_odometry
 from sensor_transposition import sliding_window
+from sensor_transposition import occupancy_grid
 
 __all__ = [
     "SensorCollection",
@@ -60,4 +61,5 @@ __all__ = [
     "rosbag",
     "wheel_odometry",
     "sliding_window",
+    "occupancy_grid",
 ]
