@@ -23,6 +23,7 @@ from sensor_transposition import radar
 from sensor_transposition import sync
 from sensor_transposition import visual_odometry
 from sensor_transposition import loop_closure
+from sensor_transposition import pose_graph
 
 __all__ = [
     "SensorCollection",
@@ -48,4 +49,5 @@ __all__ = [
     "sync",
     "visual_odometry",
     "loop_closure",
+    "pose_graph",
 ]
