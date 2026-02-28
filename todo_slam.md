@@ -113,7 +113,7 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 | Gap | Priority | Notes |
 |-----|----------|-------|
 | Extended / Unscented Kalman Filter (EKF/UKF) for pose estimation | High | ✅ Added `imu/ekf.py` with `EkfState` and `ImuEkf`; implements a 15-state Error-State EKF with `predict` (IMU propagation), `position_update` (GPS/odometry), `velocity_update` (wheel odometry/GPS-Doppler), and `pose_update` (6-DOF LiDAR scan-matching); Joseph-form covariance update for numerical stability; pure NumPy. See `docs/state_estimation.md`. |
-| IMU-LiDAR tightly/loosely coupled fusion | High | Needed to compensate for LiDAR motion distortion and produce continuous odometry at IMU rate. |
+| IMU-LiDAR tightly/loosely coupled fusion | High | ✅ Added `lidar/motion_distortion.py` with `deskew_scan`; integrates IMU gyro + accelerometer via midpoint method, SLERP for rotation and linear interpolation for position, producing per-point relative transforms w.r.t. a configurable reference timestamp. See `docs/lidar_motion_distortion.md`. |
 | GPS / GNSS absolute-position fusion | Medium | Ties the local map to a global coordinate frame; useful for multi-session SLAM. |
 | Radar-odometry or radar-SLAM integration | Low | Radar can complement LiDAR in adverse weather; no fusion mechanism exists. |
 
@@ -181,7 +181,7 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 - [X] Visual odometry (feature tracking, essential matrix, PnP)
 - [X] Place recognition / loop closure detection
 - [X] EKF/UKF state estimator for IMU + odometry fusion
-- [ ] IMU-LiDAR tightly coupled fusion (motion-distortion correction)
+- [X] IMU-LiDAR tightly coupled fusion (motion-distortion correction)
 - [ ] Pose graph data structure and optimisation back-end (g2o / GTSAM / Ceres)
 - [ ] Accumulated point-cloud or surfel map output
 - [ ] Multi-sensor synchronised visualisation platform
