@@ -128,8 +128,8 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 
 | Gap | Priority | Notes |
 |-----|----------|-------|
-| Pose graph construction (nodes = poses, edges = relative constraints) | High | No graph data structure or API for adding odometry and loop-closure edges. |
-| Non-linear graph optimisation (g2o, GTSAM, Ceres, or iSAM2) | High | Essential for global consistency after loop closures are detected. |
+| Pose graph construction (nodes = poses, edges = relative constraints) | High | ✅ Added `pose_graph.py` with `PoseGraph` (`add_node`, `add_edge`) and `PoseGraphNode` / `PoseGraphEdge` dataclasses; integrates with `FramePoseSequence`, `icp_align`, and `ScanContextDatabase`. |
+| Non-linear graph optimisation (g2o, GTSAM, Ceres, or iSAM2) | High | ✅ Added `optimize_pose_graph` in `pose_graph.py`; Gauss-Newton with numerical Jacobians, LM damping, and gauge-freedom fix (first node held constant); pure NumPy/SciPy. See `docs/pose_graph_optimisation.md`. |
 | Marginalisation / sliding-window optimisation for online SLAM | Medium | Full batch optimisation becomes intractable on long trajectories; a sliding-window or fixed-lag smoother is needed. |
 | Uncertainty / covariance propagation in `FramePose` | Medium | `FramePose` stores only the mean pose; no covariance matrix is tracked. |
 
@@ -182,7 +182,7 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 - [X] Place recognition / loop closure detection
 - [X] EKF/UKF state estimator for IMU + odometry fusion
 - [X] IMU-LiDAR tightly coupled fusion (motion-distortion correction)
-- [ ] Pose graph data structure and optimisation back-end (g2o / GTSAM / Ceres)
+- [X] Pose graph data structure and optimisation back-end (g2o / GTSAM / Ceres)
 - [ ] Accumulated point-cloud or surfel map output
 - [ ] Multi-sensor synchronised visualisation platform
 
