@@ -7,11 +7,14 @@ import pytest
 
 from sensor_transposition.loop_closure import (
     LoopClosureCandidate,
+    M2dpDescriptor,
     ScanContextDatabase,
     ScanContextDescriptor,
     _check_compatible,
     _column_cosine_distance,
+    compute_m2dp,
     compute_scan_context,
+    m2dp_distance,
     scan_context_distance,
 )
 
@@ -456,3 +459,146 @@ class TestDataclasses:
         assert c.distance == 0.12
         assert c.yaw_shift_sectors == 3
         assert c.database_index == 2
+
+
+# ---------------------------------------------------------------------------
+# compute_m2dp
+# ---------------------------------------------------------------------------
+
+
+class TestComputeM2dp:
+    def test_returns_descriptor(self):
+        pts = _random_cloud()
+        desc = compute_m2dp(pts)
+        assert isinstance(desc, M2dpDescriptor)
+
+    def test_vector_length(self):
+        pts = _random_cloud()
+        na, ne, nr, ns = 4, 8, 4, 16
+        desc = compute_m2dp(pts, num_azimuth=na, num_elevation=ne,
+                            num_rings=nr, num_sectors=ns)
+        expected_len = na * ne + nr * ns
+        assert desc.vector.shape == (expected_len,)
+
+    def test_stores_params(self):
+        pts = _random_cloud()
+        desc = compute_m2dp(pts, num_azimuth=3, num_elevation=6,
+                            num_rings=5, num_sectors=12)
+        assert desc.num_azimuth == 3
+        assert desc.num_elevation == 6
+        assert desc.num_rings == 5
+        assert desc.num_sectors == 12
+
+    def test_empty_cloud_zero_vector(self):
+        """An all-zero point cloud should yield a zero (or near-zero) descriptor."""
+        pts = np.zeros((50, 3))
+        desc = compute_m2dp(pts, num_azimuth=2, num_elevation=4,
+                            num_rings=2, num_sectors=4)
+        # All points at centroid → all projected to origin → single bin
+        assert desc.vector.shape == (2 * 4 + 2 * 4,)
+
+    def test_accepts_extra_columns(self):
+        pts = np.random.default_rng(5).uniform(-10, 10, (80, 4))
+        desc = compute_m2dp(pts, num_azimuth=2, num_elevation=4,
+                            num_rings=3, num_sectors=8)
+        assert desc.vector.shape == (2 * 4 + 3 * 8,)
+
+    def test_same_cloud_same_descriptor(self):
+        pts = _random_cloud(400, seed=20)
+        d1 = compute_m2dp(pts, num_azimuth=4, num_elevation=8,
+                          num_rings=4, num_sectors=16)
+        d2 = compute_m2dp(pts, num_azimuth=4, num_elevation=8,
+                          num_rings=4, num_sectors=16)
+        np.testing.assert_array_equal(d1.vector, d2.vector)
+
+    def test_similar_cloud_lower_distance(self):
+        """A translated copy of the cloud should match better than a random one."""
+        pts = _random_cloud(500, seed=30)
+        pts_shifted = pts + np.array([0.1, 0.1, 0.0])  # small translation
+        pts_different = _random_cloud(500, seed=31)
+
+        d_orig = compute_m2dp(pts, num_azimuth=4, num_elevation=8,
+                               num_rings=4, num_sectors=16)
+        d_shift = compute_m2dp(pts_shifted, num_azimuth=4, num_elevation=8,
+                                num_rings=4, num_sectors=16)
+        d_diff = compute_m2dp(pts_different, num_azimuth=4, num_elevation=8,
+                               num_rings=4, num_sectors=16)
+
+        dist_same = m2dp_distance(d_orig, d_shift)
+        dist_diff = m2dp_distance(d_orig, d_diff)
+        assert dist_same < dist_diff
+
+
+class TestComputeM2dpInputValidation:
+    def test_wrong_shape_raises(self):
+        with pytest.raises(ValueError, match="\\(N, ≥3\\)"):
+            compute_m2dp(np.zeros((10, 2)))
+
+    def test_1d_array_raises(self):
+        with pytest.raises(ValueError, match="\\(N, ≥3\\)"):
+            compute_m2dp(np.zeros(12))
+
+    def test_invalid_num_azimuth_raises(self):
+        pts = _random_cloud()
+        with pytest.raises(ValueError, match="num_azimuth"):
+            compute_m2dp(pts, num_azimuth=0)
+
+    def test_invalid_num_elevation_raises(self):
+        pts = _random_cloud()
+        with pytest.raises(ValueError, match="num_elevation"):
+            compute_m2dp(pts, num_elevation=0)
+
+    def test_invalid_num_rings_raises(self):
+        pts = _random_cloud()
+        with pytest.raises(ValueError, match="num_rings"):
+            compute_m2dp(pts, num_rings=0)
+
+    def test_invalid_num_sectors_raises(self):
+        pts = _random_cloud()
+        with pytest.raises(ValueError, match="num_sectors"):
+            compute_m2dp(pts, num_sectors=0)
+
+
+# ---------------------------------------------------------------------------
+# m2dp_distance
+# ---------------------------------------------------------------------------
+
+
+class TestM2dpDistance:
+    def _make_desc(self, seed: int) -> M2dpDescriptor:
+        return compute_m2dp(
+            _random_cloud(300, seed=seed),
+            num_azimuth=4, num_elevation=8, num_rings=4, num_sectors=16,
+        )
+
+    def test_identical_descriptors_zero_distance(self):
+        desc = self._make_desc(40)
+        assert m2dp_distance(desc, desc) < 1e-10
+
+    def test_distance_in_0_1_range(self):
+        d1 = self._make_desc(41)
+        d2 = self._make_desc(42)
+        dist = m2dp_distance(d1, d2)
+        assert 0.0 <= dist <= 1.0
+
+    def test_incompatible_params_raise(self):
+        d1 = compute_m2dp(_random_cloud(100, seed=0),
+                          num_azimuth=4, num_elevation=8,
+                          num_rings=4, num_sectors=16)
+        d2 = compute_m2dp(_random_cloud(100, seed=1),
+                          num_azimuth=4, num_elevation=8,
+                          num_rings=4, num_sectors=8)  # different num_sectors
+        with pytest.raises(ValueError, match="incompatible parameters"):
+            m2dp_distance(d1, d2)
+
+    def test_m2dp_descriptor_fields(self):
+        vec = np.ones(20)
+        desc = M2dpDescriptor(
+            vector=vec, num_azimuth=4, num_elevation=8,
+            num_rings=4, num_sectors=16,
+        )
+        assert desc.vector.shape == (20,)
+        assert desc.num_azimuth == 4
+        assert desc.num_elevation == 8
+        assert desc.num_rings == 4
+        assert desc.num_sectors == 16

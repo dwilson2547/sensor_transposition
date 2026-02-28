@@ -1,13 +1,14 @@
 """
 loop_closure.py
 
-Place recognition and loop-closure detection using the Scan Context descriptor.
+Place recognition and loop-closure detection using the Scan Context and M2DP
+descriptors.
 
-Scan Context [Kim & Kim, IROS 2018] encodes a 360° LiDAR scan into a compact
-2-D polar grid descriptor suitable for efficient place recognition:
+**Scan Context** [Kim & Kim, IROS 2018] encodes a 360° LiDAR scan into a
+compact 2-D polar grid descriptor suitable for efficient place recognition:
 
-* The horizontal plane around the sensor is divided into ``num_rings`` concentric
-  radial bins and ``num_sectors`` angular bins, forming an
+* The horizontal plane around the sensor is divided into ``num_rings``
+  concentric radial bins and ``num_sectors`` angular bins, forming an
   ``(num_rings × num_sectors)`` descriptor matrix.
 * Each cell stores the **maximum z-height** of points that fall inside it.
   Cells with no points are set to zero.
@@ -19,9 +20,23 @@ Scan Context [Kim & Kim, IROS 2018] encodes a 360° LiDAR scan into a compact
   distance is computed, which substantially reduces the number of full
   descriptor comparisons required.
 
-Together, :func:`compute_scan_context` and :class:`ScanContextDatabase` form
-the *appearance-based* front-end of a loop-closure pipeline.  After a
-candidate loop is found, the caller should pass the two point clouds to
+**M2DP** (Multi-view 2D Projection) [He et al., IROS 2016] builds a compact
+global descriptor by projecting the point cloud onto multiple oriented 2-D
+planes and summarising the point-density distribution on each plane:
+
+* For each of ``num_elevation × num_azimuth`` oriented planes a polar-bin
+  density histogram is computed over the projected 2-D point positions.
+* The resulting ``(num_elevation × num_azimuth, num_rings × num_sectors)``
+  signature matrix is decomposed via SVD; the first left and right singular
+  vectors are concatenated to form the final descriptor vector.
+* M2DP is viewpoint-insensitive (works well even without a strong ground
+  plane) and complements Scan Context, which is optimised for ground-vehicle
+  LiDAR.
+
+Together, :func:`compute_scan_context`, :func:`compute_m2dp`, and
+:class:`ScanContextDatabase` form the *appearance-based* front-end of a
+loop-closure pipeline.  After a candidate loop is found, the caller should
+pass the two point clouds to
 :func:`sensor_transposition.lidar.scan_matching.icp_align` for a
 geometry-based verification step and pose-graph edge estimation.
 
@@ -35,6 +50,7 @@ Typical use-case
 
     from sensor_transposition.loop_closure import (
         compute_scan_context,
+        compute_m2dp,
         ScanContextDatabase,
     )
 
@@ -52,6 +68,12 @@ Typical use-case
                   f"{candidates[0].match_frame_id} "
                   f"(distance={candidates[0].distance:.3f}, "
                   f"yaw_shift={candidates[0].yaw_shift_sectors} sectors)")
+
+    # M2DP can be used stand-alone for viewpoint-insensitive matching:
+    desc_a = compute_m2dp(point_cloud_a)
+    desc_b = compute_m2dp(point_cloud_b)
+    from sensor_transposition.loop_closure import m2dp_distance
+    print(f"M2DP distance: {m2dp_distance(desc_a, desc_b):.4f}")
 """
 
 from __future__ import annotations
@@ -60,6 +82,18 @@ from dataclasses import dataclass, field
 from typing import List
 
 import numpy as np
+
+# ---------------------------------------------------------------------------
+# Module-level constants
+# ---------------------------------------------------------------------------
+
+# Threshold for detecting when a unit vector is near-vertical (|n_z| > this
+# value), used when choosing a reference vector for orthonormal basis
+# construction in compute_m2dp.
+_VERTICAL_THRESHOLD: float = 0.99
+
+# Below this L2 norm a descriptor vector is considered a zero vector.
+_ZERO_NORM_THRESHOLD: float = 1e-12
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +146,34 @@ class LoopClosureCandidate:
     distance: float
     yaw_shift_sectors: int
     database_index: int
+
+
+@dataclass
+class M2dpDescriptor:
+    """An M2DP descriptor computed from one LiDAR scan.
+
+    M2DP (Multi-view 2D Projection) [He et al., IROS 2016] builds a compact
+    global descriptor by projecting the point cloud onto
+    ``num_elevation × num_azimuth`` oriented 2-D planes, computing a polar
+    point-density histogram on each plane, and reducing the resulting
+    signature matrix via SVD.
+
+    Attributes:
+        vector: 1-D float array of length
+            ``num_elevation * num_azimuth + num_rings * num_sectors``.
+            Formed by concatenating the first left and right singular vectors
+            of the signature matrix.
+        num_azimuth: Number of azimuthal projection directions.
+        num_elevation: Number of elevation projection directions.
+        num_rings: Number of radial bins in each 2-D projection.
+        num_sectors: Number of angular bins in each 2-D projection.
+    """
+
+    vector: np.ndarray
+    num_azimuth: int
+    num_elevation: int
+    num_rings: int
+    num_sectors: int
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +322,186 @@ def scan_context_distance(
             best_shift = shift
 
     return best_dist, best_shift
+
+
+def compute_m2dp(
+    points: np.ndarray,
+    *,
+    num_azimuth: int = 4,
+    num_elevation: int = 16,
+    num_rings: int = 4,
+    num_sectors: int = 16,
+) -> M2dpDescriptor:
+    """Compute an M2DP descriptor from a 3-D LiDAR point cloud.
+
+    The algorithm [He et al., IROS 2016]:
+
+    1. Centre the point cloud at its centroid.
+    2. For each of ``num_elevation × num_azimuth`` oriented planes (defined by
+       sweeping elevation θ over (−π/2, π/2) and azimuth φ over [0, 2π)):
+
+       a. Project the 3-D points orthogonally onto the plane using two
+          orthonormal basis vectors **e₁**, **e₂** constructed from the plane
+          normal.
+       b. Convert the 2-D projected coordinates to polar form and bin into a
+          ``(num_rings, num_sectors)`` density histogram (point counts).
+       c. Store the flattened histogram as one row of the signature matrix
+          **A** of shape ``(L, P)`` where
+          ``L = num_elevation × num_azimuth`` and
+          ``P = num_rings × num_sectors``.
+
+    3. Compute the thin SVD of **A**.  The descriptor vector is formed by
+       concatenating the first left singular vector **u₁** (length *L*) and
+       the first right singular vector **v₁** (length *P*), giving a vector
+       of length ``L + P``.
+
+    Args:
+        points: ``(N, 3)`` (or wider) float array of XYZ coordinates.
+            Only the first three columns are used.
+        num_azimuth: Number of azimuthal projection directions.  Must be ≥ 1.
+            Default ``4``.
+        num_elevation: Number of elevation projection directions.  Must be ≥ 1.
+            Default ``16``.
+        num_rings: Number of radial bins in the 2-D polar histogram.  Must be
+            ≥ 1.  Default ``4``.
+        num_sectors: Number of angular bins in the 2-D polar histogram.  Must
+            be ≥ 1.  Default ``16``.
+
+    Returns:
+        :class:`M2dpDescriptor` whose ``vector`` has length
+        ``num_elevation * num_azimuth + num_rings * num_sectors``.
+
+    Raises:
+        ValueError: If *points* is not at least ``(N, 3)``, or any parameter
+            is less than 1.
+    """
+    pts = np.asarray(points, dtype=float)
+    if pts.ndim != 2 or pts.shape[1] < 3:
+        raise ValueError(
+            f"points must be an (N, ≥3) array, got shape {pts.shape}."
+        )
+    if num_azimuth < 1:
+        raise ValueError(f"num_azimuth must be >= 1, got {num_azimuth}.")
+    if num_elevation < 1:
+        raise ValueError(f"num_elevation must be >= 1, got {num_elevation}.")
+    if num_rings < 1:
+        raise ValueError(f"num_rings must be >= 1, got {num_rings}.")
+    if num_sectors < 1:
+        raise ValueError(f"num_sectors must be >= 1, got {num_sectors}.")
+
+    xyz = pts[:, :3]
+    # Centre at the centroid.
+    xyz = xyz - xyz.mean(axis=0)
+
+    L = num_elevation * num_azimuth   # number of projection planes
+    P = num_rings * num_sectors        # bins per projection
+
+    signature = np.zeros((L, P), dtype=float)
+
+    plane_idx = 0
+    for ei in range(num_elevation):
+        # Elevation angle θ sweeps −π/2 … π/2 (exclusive) via midpoint rule.
+        theta = np.pi * (ei + 0.5) / num_elevation - np.pi / 2.0
+        for ai in range(num_azimuth):
+            phi = 2.0 * np.pi * ai / num_azimuth  # azimuth 0 … 2π
+
+            # Plane normal vector.
+            cos_t = np.cos(theta)
+            n = np.array([
+                cos_t * np.cos(phi),
+                cos_t * np.sin(phi),
+                np.sin(theta),
+            ])
+
+            # Build an orthonormal basis {e1, e2} for the plane.
+            # Choose a reference vector that is not parallel to n.
+            ref = np.array([0.0, 0.0, 1.0]) if abs(n[2]) < _VERTICAL_THRESHOLD else np.array([1.0, 0.0, 0.0])
+            e1 = np.cross(n, ref)
+            e1 /= np.linalg.norm(e1)
+            e2 = np.cross(n, e1)
+            e2 /= np.linalg.norm(e2)
+
+            # Orthogonal projection of every point onto the plane.
+            u = xyz @ e1  # (N,)
+            v = xyz @ e2  # (N,)
+
+            # Convert to polar and bin into (num_rings × num_sectors) histogram.
+            r = np.sqrt(u ** 2 + v ** 2)
+            max_r_val = r.max()
+            max_r = max_r_val if max_r_val > _ZERO_NORM_THRESHOLD else 1.0
+
+            ring_idx = np.floor(r / max_r * num_rings).astype(int)
+            ring_idx = np.clip(ring_idx, 0, num_rings - 1)
+
+            angle = np.arctan2(v, u) % (2.0 * np.pi)
+            sector_idx = np.floor(angle / (2.0 * np.pi) * num_sectors).astype(int)
+            sector_idx = np.clip(sector_idx, 0, num_sectors - 1)
+
+            density = np.zeros((num_rings, num_sectors), dtype=float)
+            np.add.at(density, (ring_idx, sector_idx), 1)
+            signature[plane_idx] = density.ravel()
+            plane_idx += 1
+
+    # SVD decomposition of the signature matrix.
+    if signature.any():
+        U, _s, Vt = np.linalg.svd(signature, full_matrices=False)
+        u1 = U[:, 0]    # first left singular vector  (L,)
+        v1 = Vt[0, :]   # first right singular vector (P,)
+    else:
+        u1 = np.zeros(L, dtype=float)
+        v1 = np.zeros(P, dtype=float)
+
+    return M2dpDescriptor(
+        vector=np.concatenate([u1, v1]),
+        num_azimuth=num_azimuth,
+        num_elevation=num_elevation,
+        num_rings=num_rings,
+        num_sectors=num_sectors,
+    )
+
+
+def m2dp_distance(
+    desc_a: M2dpDescriptor,
+    desc_b: M2dpDescriptor,
+) -> float:
+    """Compute the cosine distance between two M2DP descriptors.
+
+    Args:
+        desc_a: First :class:`M2dpDescriptor`.
+        desc_b: Second :class:`M2dpDescriptor`.
+
+    Returns:
+        Cosine distance in ``[0, 1]`` — lower means more similar.
+
+    Raises:
+        ValueError: If the two descriptors have incompatible parameters.
+    """
+    if (
+        desc_a.num_azimuth != desc_b.num_azimuth
+        or desc_a.num_elevation != desc_b.num_elevation
+        or desc_a.num_rings != desc_b.num_rings
+        or desc_a.num_sectors != desc_b.num_sectors
+    ):
+        raise ValueError(
+            "M2DP descriptors have incompatible parameters: "
+            f"({desc_a.num_azimuth}, {desc_a.num_elevation}, "
+            f"{desc_a.num_rings}, {desc_a.num_sectors}) vs "
+            f"({desc_b.num_azimuth}, {desc_b.num_elevation}, "
+            f"{desc_b.num_rings}, {desc_b.num_sectors})."
+        )
+
+    a = desc_a.vector
+    b = desc_b.vector
+    norm_a = np.linalg.norm(a)
+    norm_b = np.linalg.norm(b)
+
+    if norm_a < _ZERO_NORM_THRESHOLD and norm_b < _ZERO_NORM_THRESHOLD:
+        return 0.0  # both zero vectors → identical (both from empty clouds)
+    if norm_a < _ZERO_NORM_THRESHOLD or norm_b < _ZERO_NORM_THRESHOLD:
+        return 1.0  # one is zero → maximally different
+
+    cos_sim = float(np.dot(a, b) / (norm_a * norm_b))
+    return float(1.0 - np.clip(cos_sim, -1.0, 1.0))
 
 
 class ScanContextDatabase:
@@ -480,12 +722,12 @@ def _column_cosine_distance(A: np.ndarray, B: np.ndarray) -> float:
     # For rows where both norms are zero the vectors are identical (all zeros),
     # so cosine distance is 0.  Rows where only one norm is zero have cosine
     # similarity 0 (since denom = 0), giving cos_dist = 1 — maximum distance.
-    both_zero = (norm_a < 1e-12) & (norm_b < 1e-12)
+    both_zero = (norm_a < _ZERO_NORM_THRESHOLD) & (norm_b < _ZERO_NORM_THRESHOLD)
 
     # Compute cosine similarity safely: avoid division by zero by substituting
     # 1.0 for near-zero denominators (the result is overridden by np.where).
-    safe_denom = np.where(denom > 1e-12, denom, 1.0)
-    cos_sim = np.where(denom > 1e-12, dot / safe_denom, 0.0)
+    safe_denom = np.where(denom > _ZERO_NORM_THRESHOLD, denom, 1.0)
+    cos_sim = np.where(denom > _ZERO_NORM_THRESHOLD, dot / safe_denom, 0.0)
     cos_dist = 1.0 - np.clip(cos_sim, -1.0, 1.0)
     # Rows where both vectors are zero are identical → distance 0.
     # Rows where only one vector is zero → maximally different → distance 1.
