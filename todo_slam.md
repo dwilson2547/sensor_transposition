@@ -65,7 +65,7 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 | GPS / GNSS ROS driver integration and RTK setup guide | High | `gps/nmea.py` parses log files but there is no live-driver config or RTK correction pipeline. Noted in `TODO.md`. |
 | IMU ROS driver integration | Medium | ✅ Added `ros_examples/ros/microstrain_imu.launch` (ROS 1) and `ros_examples/ros2/microstrain_imu_params.yaml` (ROS 2) for the MicroStrain IMU driver. |
 | Radar ROS driver integration | Medium | ✅ Added `ros_examples/ros/ti_mmwave_radar.launch` (ROS 1) and `ros_examples/ros2/ti_mmwave_radar_params.yaml` (ROS 2) for the TI mmWave radar driver. |
-| Rosbag / MCAP recording and playback utilities | Medium | No tooling to record or replay multi-sensor data in a ROS-compatible bag format. |
+| Rosbag / MCAP recording and playback utilities | Medium | ✅ Added `rosbag.py` with `BagWriter` (streaming write), `BagReader` (indexed read), and `BagMessage` dataclass; simple binary bag format with topic + timestamp + JSON payload; topic and time-range filtering; no external dependencies. See `docs/rosbag.md`. |
 | Data capture instructions and intrinsic calculation guide | Medium | ✅ Added data collection guides in `docs/` for cameras (pinhole: `camera_intrinsics_guide.md`; fisheye: `fisheye_camera_intrinsics_guide.md`), GPS (`gps_data_collection.md`), LiDAR (`lidar_data_collection.md`), and radar (`radar_data_collection.md`). |
 
 ---
@@ -192,7 +192,7 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 - [X] IMU noise model / Allan-variance parameters in `SensorCollection`
 - [X] Rolling-shutter camera model and correction
 - [X] IMU and radar ROS driver examples
-- [ ] Rosbag / MCAP recording and playback utilities
+- [X] Rosbag / MCAP recording and playback utilities
 - [X] Data capture and intrinsic calculation guide
 - [ ] Wheel odometry / vehicle kinematic model
 - [ ] LiDAR descriptor-based place recognition (Scan Context, M2DP)
