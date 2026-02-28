@@ -82,7 +82,7 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 |-----|----------|-------|
 | LiDAR odometry / scan matching (ICP, NDT, or LOAM-style) | High | ✅ Added `lidar/scan_matching.py` with point-to-point ICP (`icp_align`) using the Kabsch SVD algorithm and a scipy KD-tree for nearest-neighbour search; supports max-correspondence distance filtering, an optional initial transform, and convergence tolerance. |
 | IMU pre-integration | High | ✅ Added `imu/preintegration.py` with `ImuPreintegrator` class; uses midpoint (trapezoidal) method to accumulate ΔR, Δv, Δp between keyframe timestamps. |
-| Visual odometry (feature tracking / direct methods) | High | No optical flow, ORB/SIFT keypoint extraction, essential-matrix estimation, or PnP solver. |
+| Visual odometry (feature tracking / direct methods) | High | ✅ Added `visual_odometry.py` with `estimate_essential_matrix` (normalised 8-point algorithm + RANSAC), `recover_pose_from_essential` (SVD decomposition + cheirality test), and `solve_pnp` (DLT + RANSAC); pure NumPy/SciPy implementation. |
 | Wheel odometry / vehicle kinematic model | Medium | No differential-drive or Ackermann model for dead-reckoning between frames. |
 | GPS-to-local-frame converter (ECEF ↔ ENU / UTM) | Medium | ✅ Added `gps/converter.py` with `geodetic_to_ecef`, `ecef_to_geodetic`, `ecef_to_enu`, `enu_to_ecef`, `geodetic_to_enu`, `geodetic_to_utm`, and `utm_to_geodetic`. |
 
@@ -178,7 +178,7 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 - [X] GPS/RTK driver integration and ECEF/ENU/UTM conversion
 - [X] IMU pre-integration
 - [X] LiDAR odometry / scan matching (ICP, NDT; Kiss-ICP integration)
-- [ ] Visual odometry (feature tracking, essential matrix, PnP)
+- [X] Visual odometry (feature tracking, essential matrix, PnP)
 - [ ] Place recognition / loop closure detection
 - [ ] EKF/UKF state estimator for IMU + odometry fusion
 - [ ] IMU-LiDAR tightly coupled fusion (motion-distortion correction)
