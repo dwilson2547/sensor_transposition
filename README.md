@@ -16,6 +16,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
   - [Transform](#transform)
   - [LiDAR–Camera Fusion](#lidar-camera-fusion)
   - [LiDAR Parsers](#lidar-parsers)
+  - [LiDAR Scan Matching](#lidar-scan-matching)
   - [GPS / GNSS](#gps--gnss)
   - [GPS Coordinate-Frame Converter](#gps-coordinate-frame-converter)
   - [IMU](#imu)
@@ -33,6 +34,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
 - **Homogeneous transforms** – composable 4×4 `Transform` objects with helpers for building from quaternions or rotation matrices, inverting, and applying to point clouds.
 - **LiDAR–camera fusion** – project 3-D LiDAR point clouds onto a camera image plane and colour the cloud by sampling pixel values.
 - **LiDAR parsers** – binary readers for Velodyne (KITTI `.bin`), Ouster (4-column and 8-column `.bin`), and Livox (LVX / LVX2) file formats.
+- **LiDAR scan matching** – point-to-point ICP (Iterative Closest Point) with the Kabsch SVD algorithm and a KD-tree nearest-neighbour search; supports a maximum correspondence-distance filter, an optional initial transform, and a configurable convergence tolerance.
 - **GPS / GNSS** – NMEA 0183 parser supporting GGA and RMC sentence types, plus a coordinate-frame converter for ECEF ↔ ENU and geodetic ↔ UTM conversions.
 - **IMU** – binary parser for 32-byte (accel + gyro) and 48-byte (accel + gyro + quaternion) records.
 - **Radar** – binary parser for 5-field (range, azimuth, elevation, velocity, SNR) detection records with spherical → Cartesian conversion.
@@ -286,6 +288,44 @@ xyz    = parser.xyz()
 ```
 
 Supported data types: Cartesian float32 (type 0), Spherical float32 (type 1), Cartesian int32 mm-precision (type 2, LVX2).
+
+---
+
+### LiDAR Scan Matching
+
+Point-to-point ICP (Iterative Closest Point) scan matching for LiDAR frame-to-frame odometry and map-to-scan localisation.
+
+```python
+from sensor_transposition.lidar.scan_matching import icp_align
+import numpy as np
+
+# Align source cloud to target cloud
+result = icp_align(source_xyz, target_xyz, max_iterations=50)
+
+if result.converged:
+    print("Transform:\n", result.transform)   # 4×4 homogeneous matrix
+    print("MSE:", result.mean_squared_error)  # mean squared point distance
+
+# Apply the recovered transform to the source points
+R = result.transform[:3, :3]
+t = result.transform[:3, 3]
+aligned = (R @ source_xyz.T).T + t
+```
+
+**Parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `max_iterations` | `50` | Maximum ICP iterations |
+| `tolerance` | `1e-6` | Convergence threshold on MSE change per iteration |
+| `max_correspondence_dist` | `inf` | Reject source–target pairs farther apart than this (metres) |
+| `initial_transform` | `None` | Optional 4×4 initial guess applied before the first iteration |
+
+The returned `IcpResult` contains:
+- `transform` – 4×4 homogeneous matrix mapping source → target frame
+- `converged` – ``True`` if the tolerance condition was met
+- `num_iterations` – iterations actually performed
+- `mean_squared_error` – final mean squared point-to-point distance (inliers only)
 
 ---
 
