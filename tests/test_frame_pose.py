@@ -78,6 +78,48 @@ class TestFramePose:
         assert pose.translation == [0.0, 0.0, 0.0]
         assert pose.rotation == [1.0, 0.0, 0.0, 0.0]
 
+    def test_covariance_default_is_none(self):
+        pose = FramePose(timestamp=0.0)
+        assert pose.covariance is None
+
+    def test_covariance_set(self):
+        cov = np.eye(6) * 0.01
+        pose = FramePose(timestamp=0.0, covariance=cov)
+        assert pose.covariance is not None
+        np.testing.assert_array_equal(pose.covariance, cov)
+
+    def test_to_dict_without_covariance(self):
+        pose = FramePose(timestamp=0.0)
+        d = pose.to_dict()
+        assert "covariance" not in d
+
+    def test_to_dict_with_covariance(self):
+        cov = np.eye(6) * 0.5
+        pose = FramePose(timestamp=0.0, covariance=cov)
+        d = pose.to_dict()
+        assert "covariance" in d
+        assert len(d["covariance"]) == 6
+        assert len(d["covariance"][0]) == 6
+        np.testing.assert_allclose(np.array(d["covariance"]), cov)
+
+    def test_round_trip_dict_with_covariance(self):
+        cov = np.diag([0.1, 0.2, 0.3, 0.01, 0.02, 0.03])
+        pose = FramePose(timestamp=1.0, translation=[1.0, 2.0, 3.0], rotation=[1.0, 0.0, 0.0, 0.0], covariance=cov)
+        d = pose.to_dict()
+        pose2 = FramePose.from_dict(d)
+        assert pose2.covariance is not None
+        np.testing.assert_allclose(pose2.covariance, cov)
+
+    def test_from_dict_no_covariance_key(self):
+        """from_dict without covariance key yields covariance=None."""
+        pose = FramePose.from_dict({"timestamp": 1.0, "translation": [0.0, 0.0, 0.0], "rotation": {"quaternion": [1.0, 0.0, 0.0, 0.0]}})
+        assert pose.covariance is None
+
+    def test_covariance_shape(self):
+        cov = np.eye(6)
+        pose = FramePose(timestamp=0.0, covariance=cov)
+        assert pose.covariance.shape == (6, 6)
+
 
 # ---------------------------------------------------------------------------
 # FramePoseSequence tests
@@ -227,5 +269,30 @@ class TestFramePoseSequence:
             assert raw["frame_duration"] == pytest.approx(0.1)
             assert len(raw["poses"]) == 1
             assert raw["poses"][0]["timestamp"] == pytest.approx(0.0)
+        finally:
+            os.unlink(path)
+
+    def test_yaml_round_trip_with_covariance(self):
+        """Pose covariance survives a YAML serialisation round-trip."""
+        cov = np.diag([0.1, 0.2, 0.3, 0.01, 0.02, 0.03])
+        seq = FramePoseSequence(
+            frame_duration=0.1,
+            poses=[
+                FramePose(timestamp=0.0, translation=[0.0, 0.0, 0.0],
+                          rotation=[1.0, 0.0, 0.0, 0.0], covariance=cov),
+                FramePose(timestamp=0.1, translation=[1.0, 0.0, 0.0],
+                          rotation=[1.0, 0.0, 0.0, 0.0]),  # no covariance
+            ],
+        )
+        with tempfile.NamedTemporaryFile(suffix=".yaml", delete=False) as f:
+            path = f.name
+        try:
+            seq.to_yaml(path)
+            seq2 = FramePoseSequence.from_yaml(path)
+            p0 = seq2.get_pose(0)
+            assert p0.covariance is not None
+            np.testing.assert_allclose(p0.covariance, cov, atol=1e-12)
+            p1 = seq2.get_pose(1)
+            assert p1.covariance is None
         finally:
             os.unlink(path)

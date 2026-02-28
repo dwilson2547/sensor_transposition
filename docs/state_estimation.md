@@ -312,5 +312,76 @@ ImuEkf.pose_update         →  correct drift with geometry constraints
 ```
 
 For global consistency after loop closures, pass the corrected trajectory to
-a pose-graph optimiser (see `TODO.md` — back-end graph optimisation is the
-next pipeline stage after state estimation).
+a pose-graph optimiser (see `pose_graph.py`).
+
+---
+
+## Covariance Tracking in `FramePose`
+
+After each filter update, the position/orientation uncertainty captured in
+`EkfState.covariance` (a 15×15 matrix) can be condensed into the 6-DOF
+pose-covariance block and stored directly on the corresponding
+[`FramePose`](../sensor_transposition/frame_pose.py) object.
+
+### Covariance convention
+
+`FramePose.covariance` is an **optional 6×6 ndarray** ordered
+`[x, y, z, rx, ry, rz]` — translation components first, followed by the
+rotation-vector (SO(3) tangent-space) components.  This matches the
+information-matrix ordering used by `PoseGraphEdge`.  When no covariance
+estimate is available the field is `None`.
+
+### Extracting the 6-DOF pose covariance from the EKF
+
+The ES-EKF `EkfState.covariance` is a 15×15 matrix with block structure:
+
+```
+P = [ P_pp  P_pv  P_pθ  …  ]
+    [ P_vp  P_vv  P_vθ  …  ]
+    [ P_θp  P_θv  P_θθ  …  ]
+    [ …     …     …     …  ]
+```
+
+where rows/cols 0–2 are position (`δp`), 3–5 are velocity (`δv`), and 6–8
+are orientation (`δθ`).  Extract and store the 6×6 pose-covariance block
+as follows:
+
+```python
+import numpy as np
+from sensor_transposition.frame_pose import FramePose
+
+# Indices in the 15-D error state: position (0:3), orientation (6:9).
+idx = np.ix_([0, 1, 2, 6, 7, 8], [0, 1, 2, 6, 7, 8])
+pose_cov = state.covariance[idx]   # 6×6, ordered [x, y, z, rx, ry, rz]
+
+frame = FramePose(
+    timestamp=state.timestamp,
+    translation=state.position.tolist(),
+    rotation=state.quaternion.tolist(),
+    covariance=pose_cov,
+)
+sequence.add_pose(frame)
+```
+
+### Serialisation
+
+The covariance is transparently serialised to and from YAML via
+`FramePoseSequence.to_yaml` / `from_yaml`:
+
+```yaml
+poses:
+  - timestamp: 1.0
+    translation: [1.23, 0.01, 0.00]
+    rotation:
+      quaternion: [1.0, 0.0, 0.0, 0.0]
+    covariance:
+      - [0.01, 0.0, 0.0, 0.0, 0.0, 0.0]
+      - [0.0, 0.01, 0.0, 0.0, 0.0, 0.0]
+      - [0.0, 0.0, 0.04, 0.0, 0.0, 0.0]
+      - [0.0, 0.0, 0.0, 0.0001, 0.0, 0.0]
+      - [0.0, 0.0, 0.0, 0.0, 0.0001, 0.0]
+      - [0.0, 0.0, 0.0, 0.0, 0.0, 0.0004]
+```
+
+Poses without a covariance estimate simply omit the `covariance` key and
+the field is set to `None` on load.

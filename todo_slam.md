@@ -132,7 +132,7 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 | Pose graph construction (nodes = poses, edges = relative constraints) | High | ✅ Added `pose_graph.py` with `PoseGraph` (`add_node`, `add_edge`) and `PoseGraphNode` / `PoseGraphEdge` dataclasses; integrates with `FramePoseSequence`, `icp_align`, and `ScanContextDatabase`. |
 | Non-linear graph optimisation (g2o, GTSAM, Ceres, or iSAM2) | High | ✅ Added `optimize_pose_graph` in `pose_graph.py`; Gauss-Newton with numerical Jacobians, LM damping, and gauge-freedom fix (first node held constant); pure NumPy/SciPy. See `docs/pose_graph_optimisation.md`. |
 | Marginalisation / sliding-window optimisation for online SLAM | Medium | ✅ Added `sliding_window.py` with `SlidingWindowSmoother`; fixed-lag smoother with world-frame prior factors derived from marginalised nodes; bounds per-step cost to O(window_size³); pure NumPy/SciPy. See `docs/sliding_window.md`. |
-| Uncertainty / covariance propagation in `FramePose` | Medium | `FramePose` stores only the mean pose; no covariance matrix is tracked. |
+| Uncertainty / covariance propagation in `FramePose` | Medium | ✅ Added optional `covariance` field (6×6 ndarray, ordering `[x, y, z, rx, ry, rz]`) to `FramePose`; serialised/deserialised via `to_dict`/`from_dict` and YAML I/O; `None` when no estimate is available. Convention matches the information-matrix ordering in `PoseGraphEdge`. |
 
 ---
 
@@ -199,7 +199,7 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 - [X] LiDAR descriptor-based place recognition (Scan Context, M2DP)
 - [X] GPS absolute-position fusion into local map
 - [X] Sliding-window / fixed-lag smoother for online SLAM
-- [ ] Covariance tracking in `FramePose`
+- [X] Covariance tracking in `FramePose`
 - [ ] Occupancy grid (2-D / 3-D)
 - [ ] Voxel map / TSDF volumetric representation
 - [ ] Map serialisation (PCD, PLY)
