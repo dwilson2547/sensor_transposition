@@ -161,9 +161,9 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 
 | Gap | Priority | Notes |
 |-----|----------|-------|
-| Multi-sensor data viewer (point clouds, images, trajectory) | High | A viewer that can synchronise and display data from all sensors is noted in `TODO.md`. |
-| Real-time trajectory and map visualisation (RViz, Open3D, rerun.io) | High | Essential for debugging odometry and loop closures. |
-| LiDAR–camera overlay visualisation | Medium | `lidar_camera.py` projects points but there is no rendering or display utility. |
+| Multi-sensor data viewer (point clouds, images, trajectory) | High | ✅ Added `visualisation.py` with `render_birdseye_view` (height-coded BEV image), `render_trajectory_birdseye`, `overlay_lidar_on_image`, `export_point_cloud_open3d`, `export_trajectory_rviz`, and `SensorFrameVisualiser` (per-frame multi-sensor container); pure NumPy. See `docs/visualisation.md`. |
+| Real-time trajectory and map visualisation (RViz, Open3D, rerun.io) | High | ✅ `export_point_cloud_open3d` and `export_trajectory_rviz` in `visualisation.py` serialise data to Open3D-compatible dicts and RViz `Marker` dicts respectively; `SensorFrameVisualiser.render_birdseye` provides a dependency-free BEV view for debugging. |
+| LiDAR–camera overlay visualisation | Medium | ✅ `overlay_lidar_on_image` in `visualisation.py` depth-codes projected LiDAR points and overlays them on a camera image; `SensorFrameVisualiser.render_camera_with_lidar` exposes the same helper through the frame container. |
 
 ---
 
@@ -184,7 +184,7 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 - [X] IMU-LiDAR tightly coupled fusion (motion-distortion correction)
 - [X] Pose graph data structure and optimisation back-end (g2o / GTSAM / Ceres)
 - [X] Accumulated point-cloud or surfel map output
-- [ ] Multi-sensor synchronised visualisation platform
+- [X] Multi-sensor synchronised visualisation platform
 
 ### Medium Priority
 - [X] Temporal extrinsic (clock-offset) calibration field in `SensorCollection`
@@ -202,7 +202,7 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 - [ ] Occupancy grid (2-D / 3-D)
 - [ ] Voxel map / TSDF volumetric representation
 - [ ] Map serialisation (PCD, PLY)
-- [ ] LiDAR–camera overlay display utility
+- [X] LiDAR–camera overlay display utility
 
 ### Low Priority
 - [ ] Radar-odometry / radar-SLAM integration
