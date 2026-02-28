@@ -91,7 +91,8 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 ### 4. Loop Closure Detection
 
 **Present:**
-- Nothing directly applicable.
+- Scan Context descriptor (`compute_scan_context`, `ScanContextDatabase`) for appearance-based loop closure
+- M2DP descriptor (`compute_m2dp`, `m2dp_distance`) for viewpoint-insensitive place recognition
 
 **Gaps:**
 
@@ -99,7 +100,7 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 |-----|----------|-------|
 | Place recognition / appearance-based descriptor (DBoW, NetVLAD, etc.) | High | ✅ Added `loop_closure.py` with `compute_scan_context` (Scan Context polar-grid descriptor), `scan_context_distance` (rotation-invariant normalised cosine distance with column-shift search), and `ScanContextDatabase` (two-stage ring-key pre-filter + full descriptor search with exclusion window). Pure NumPy/SciPy; no additional dependencies. |
 | Geometry-based loop closure verification (ICP/NDT re-alignment) | High | ✅ Handled by the existing `lidar/scan_matching.py` `icp_align` function; after a loop candidate is found via `ScanContextDatabase.query`, callers pass the two point clouds to `icp_align` for geometric verification and edge estimation. |
-| LiDAR descriptor matching (Scan Context, M2DP, etc.) | Medium | LiDAR-based place recognition can complement or replace visual bag-of-words approaches. |
+| LiDAR descriptor matching (Scan Context, M2DP, etc.) | Medium | ✅ Added `compute_m2dp`, `M2dpDescriptor`, and `m2dp_distance` to `loop_closure.py`; projects the point cloud onto multiple oriented planes, bins point density into polar histograms, and compresses via SVD (first left + right singular vectors). Complements Scan Context for environments where the ground-plane assumption does not hold. See `docs/loop_closure.md`. |
 
 ---
 
@@ -195,7 +196,7 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 - [X] Rosbag / MCAP recording and playback utilities
 - [X] Data capture and intrinsic calculation guide
 - [X] Wheel odometry / vehicle kinematic model
-- [ ] LiDAR descriptor-based place recognition (Scan Context, M2DP)
+- [X] LiDAR descriptor-based place recognition (Scan Context, M2DP)
 - [ ] GPS absolute-position fusion into local map
 - [ ] Sliding-window / fixed-lag smoother for online SLAM
 - [ ] Covariance tracking in `FramePose`
