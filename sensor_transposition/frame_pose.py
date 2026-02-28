@@ -8,7 +8,14 @@ A *frame* is a span of time containing data from one or more sensors.  The
 default frame duration is 0.1 s, which aligns with the rotation period of
 typical Velodyne LiDAR sensors.  Each :class:`FramePose` records the ego-frame
 pose (position + orientation) in a fixed world/map reference frame at a given
-timestamp.
+timestamp, and optionally a 6×6 pose-covariance matrix.
+
+The covariance matrix follows the ordering ``[x, y, z, rx, ry, rz]``,
+consistent with the information matrix convention in
+:class:`sensor_transposition.pose_graph.PoseGraphEdge`.  Sources such as
+:class:`sensor_transposition.imu.ekf.ImuEkf` and
+:func:`sensor_transposition.pose_graph.optimize_pose_graph` can populate
+this field to propagate uncertainty through the SLAM pipeline.
 
 :class:`FramePoseSequence` is an ordered container of frame poses representing
 the trajectory of the sensor collection – a building block for SLAM
@@ -35,7 +42,8 @@ from sensor_transposition.sensor_collection import _make_transform
 
 @dataclass
 class FramePose:
-    """Position and orientation of the sensor collection at a given frame.
+    """Position, orientation, and optional covariance of the sensor collection
+    at a given frame.
 
     A frame represents a configurable span of time (see
     :class:`FramePoseSequence`) containing data from one or more sensors.
@@ -47,11 +55,18 @@ class FramePose:
         translation: ``[x, y, z]`` position in the world/map frame (metres).
         rotation: Unit quaternion ``[w, x, y, z]`` describing the orientation
             of the ego frame in the world/map frame.
+        covariance: Optional 6×6 pose-covariance matrix.  Rows and columns
+            are ordered ``[x, y, z, rx, ry, rz]`` — translation components
+            first, then rotation (rotation vector / SO(3) tangent space).
+            ``None`` means no covariance estimate is available.  This
+            convention is consistent with the information-matrix ordering
+            used by :class:`sensor_transposition.pose_graph.PoseGraphEdge`.
     """
 
     timestamp: float
     translation: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
     rotation: List[float] = field(default_factory=lambda: [1.0, 0.0, 0.0, 0.0])
+    covariance: Optional[np.ndarray] = field(default=None)
 
     @property
     def transform(self) -> np.ndarray:
@@ -59,21 +74,28 @@ class FramePose:
         return _make_transform(self.rotation, self.translation)
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "timestamp": float(self.timestamp),
             "translation": [float(v) for v in self.translation],
             "rotation": {
                 "quaternion": [float(v) for v in self.rotation],
             },
         }
+        if self.covariance is not None:
+            cov = np.asarray(self.covariance, dtype=float)
+            d["covariance"] = cov.tolist()
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> "FramePose":
         rotation_data = data.get("rotation", {})
+        cov_raw = data.get("covariance")
+        covariance = np.array(cov_raw, dtype=float) if cov_raw is not None else None
         return cls(
             timestamp=float(data["timestamp"]),
             translation=[float(v) for v in data.get("translation", [0.0, 0.0, 0.0])],
             rotation=[float(v) for v in rotation_data.get("quaternion", [1.0, 0.0, 0.0, 0.0])],
+            covariance=covariance,
         )
 
 
