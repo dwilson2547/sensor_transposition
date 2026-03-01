@@ -116,7 +116,7 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 | Extended / Unscented Kalman Filter (EKF/UKF) for pose estimation | High | ✅ Added `imu/ekf.py` with `EkfState` and `ImuEkf`; implements a 15-state Error-State EKF with `predict` (IMU propagation), `position_update` (GPS/odometry), `velocity_update` (wheel odometry/GPS-Doppler), and `pose_update` (6-DOF LiDAR scan-matching); Joseph-form covariance update for numerical stability; pure NumPy. See `docs/state_estimation.md`. |
 | IMU-LiDAR tightly/loosely coupled fusion | High | ✅ Added `lidar/motion_distortion.py` with `deskew_scan`; integrates IMU gyro + accelerometer via midpoint method, SLERP for rotation and linear interpolation for position, producing per-point relative transforms w.r.t. a configurable reference timestamp. See `docs/lidar_motion_distortion.md`. |
 | GPS / GNSS absolute-position fusion | Medium | ✅ Added `GpsFuser` class and `hdop_to_noise` helper to `gps/fusion.py`; converts GGA/RMC fixes to local ENU, fuses into `ImuEkf` via `position_update`, and adds/updates `FramePose` entries in a `FramePoseSequence`. See `docs/gps_fusion.md`. |
-| Radar-odometry or radar-SLAM integration | Low | Radar can complement LiDAR in adverse weather; no fusion mechanism exists. |
+| Radar-odometry or radar-SLAM integration | Low | ✅ Added `radar/radar_odometry.py` with `estimate_ego_velocity` (Doppler-based least-squares ego-velocity), `radar_scan_match` (ICP wrapper), and `RadarOdometer` (frame-to-frame scan matching with accumulated world-frame pose); functional API `integrate_radar_odometry` also provided. See `docs/radar_odometry.md`. |
 
 ---
 
@@ -206,6 +206,6 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 - [X] LiDAR–camera overlay display utility
 
 ### Low Priority
-- [ ] Radar-odometry / radar-SLAM integration
+- [X] Radar-odometry / radar-SLAM integration
 - [ ] Map management (submap division, keyframe selection)
 - [ ] Marginalisation for very long trajectories
