@@ -149,7 +149,7 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 | Occupancy grid (2-D or 3-D) | Medium | ✅ Added `occupancy_grid.py` with `OccupancyGrid`; log-odds probabilistic updates, Bresenham ray-casting for free-space marking, configurable Z-height filter, ROS-compatible `int8` output (−1 unknown / 0 free / 100 occupied), coordinate conversion helpers, and `to_probability()`. See `docs/occupancy_grid.md`. |
 | Voxel map / TSDF volumetric representation | Medium | ✅ Added `voxel_map.py` with `TSDFVolume`; 3-D voxel grid with truncated SDF integration from point clouds + poses, running weighted-average fusion, surface extraction at the zero-crossing, and voxel/world coordinate helpers. Pure NumPy/SciPy. See `docs/voxel_map.md`. |
 | Map serialisation (PCD, PLY, or custom binary format) | Medium | ✅ Added `save_pcd`, `save_ply`, `from_pcd`, and `from_ply` to `PointCloudMap`; ASCII PCD (v0.7, PCL-compatible) and ASCII PLY (CloudCompare / MeshLab / Open3D compatible); supports coloured and uncoloured maps. See `docs/point_cloud_map.md`. |
-| Map management (submap division, keyframe selection) | Low | Needed for large-scale or long-duration sessions. |
+| Map management (submap division, keyframe selection) | Low | ✅ Added `submap_manager.py` with `KeyframeSelector` (translation/rotation thresholds), `Submap` (local map container), and `SubmapManager` (configurable submap size with optional overlap carry-over); pure NumPy. See `docs/submap_manager.md`. |
 
 ---
 
@@ -207,5 +207,5 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 
 ### Low Priority
 - [X] Radar-odometry / radar-SLAM integration
-- [ ] Map management (submap division, keyframe selection)
+- [X] Map management (submap division, keyframe selection)
 - [ ] Marginalisation for very long trajectories
