@@ -93,6 +93,21 @@ keyframe ID.
 """
 
 
+def _pose_dict(translation: list, quaternion: list) -> dict:
+    """Build the standard pose dict ``{"translation", "quaternion", "transform"}``.
+
+    Returns copies of the input lists to ensure independence from the caller.
+    """
+    T = np.eye(4)
+    T[:3, 3] = np.asarray(translation, dtype=float)
+    T[:3, :3] = _quat_to_rotmat(np.asarray(quaternion, dtype=float))
+    return {
+        "translation": list(translation),
+        "quaternion": list(quaternion),
+        "transform": T,
+    }
+
+
 # ---------------------------------------------------------------------------
 # SlidingWindowSmoother
 # ---------------------------------------------------------------------------
@@ -192,6 +207,12 @@ class SlidingWindowSmoother:
         # Maps active node_id → list of (T_prior: ndarray(4,4), Omega: ndarray(6,6)).
         self._priors: Dict[int, List[Tuple[np.ndarray, np.ndarray]]] = {}
 
+        # Historical record of each evicted node's last optimised world-frame
+        # pose.  Grows monotonically as nodes are marginalised, enabling full
+        # trajectory recovery for arbitrarily long runs.
+        # node_id -> {"translation": list[float], "quaternion": list[float]}
+        self._marginalised_poses: Dict[int, dict] = {}
+
         self._latest_result: Optional[OptimizationResult] = None
 
     # ------------------------------------------------------------------
@@ -214,6 +235,47 @@ class SlidingWindowSmoother:
         from the most recent :meth:`optimize` call, or ``None`` if
         :meth:`optimize` has not yet been called."""
         return self._latest_result
+
+    @property
+    def marginalised_poses(self) -> Dict[int, dict]:
+        """World-frame poses of all nodes that have been evicted from the window.
+
+        Maps node ID to a dict with keys:
+
+        * ``"translation"`` – optimised ``[x, y, z]`` at eviction time.
+        * ``"quaternion"``  – optimised ``[w, x, y, z]`` at eviction time.
+        * ``"transform"``   – 4×4 SE(3) numpy array at eviction time.
+
+        For very long trajectories this preserves the complete historical
+        record of poses that have left the active window.  The entries are
+        added in eviction order and are never removed.
+        """
+        out: Dict[int, dict] = {}
+        for nid, d in self._marginalised_poses.items():
+            out[nid] = _pose_dict(d["translation"], d["quaternion"])
+        return out
+
+    def full_trajectory(self) -> Dict[int, dict]:
+        """Return the complete trajectory: marginalised nodes and active nodes.
+
+        Merges :attr:`marginalised_poses` (historical) with the most recently
+        optimised poses from the active window to produce a mapping from every
+        node ID ever added to its best world-frame pose estimate.
+
+        * **Marginalised nodes** use the pose recorded at eviction time.
+        * **Active nodes** use the latest value updated by :meth:`optimize`.
+
+        This method enables full trajectory recovery for arbitrarily long runs
+        without keeping all nodes in the active optimisation window.
+
+        Returns:
+            Dict mapping ``node_id`` to
+            ``{"translation": list, "quaternion": list, "transform": ndarray}``.
+        """
+        trajectory = self.marginalised_poses  # returns a fresh copy
+        for nid, d in self._node_data.items():
+            trajectory[nid] = _pose_dict(d["translation"], d["quaternion"])
+        return trajectory
 
     # ------------------------------------------------------------------
     # Node management
@@ -496,6 +558,16 @@ class SlidingWindowSmoother:
             for e in self._edges
             if e["from_id"] != old_id and e["to_id"] != old_id
         ]
+
+        # Record the final optimised pose for long-trajectory access before
+        # removing the node from the active data store.  Store copies of the
+        # lists to ensure the stored snapshot is independent of any future
+        # mutations to the (now-deleted) node data.
+        d = self._node_data[old_id]
+        self._marginalised_poses[old_id] = {
+            "translation": list(d["translation"]),
+            "quaternion": list(d["quaternion"]),
+        }
 
         # Remove the departing node's data.
         del self._node_data[old_id]
