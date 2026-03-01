@@ -147,7 +147,7 @@ A production SLAM pipeline is typically divided into the stages below. Each gap 
 |-----|----------|-------|
 | Accumulated point-cloud / surfel map | High | ✅ Added `point_cloud_map.py` with `PointCloudMap`; supports per-scan ego-to-world transform, optional per-point RGB colour (uint8 or float), FIFO `max_points` cap, and voxel-grid centroid downsampling. See `docs/point_cloud_map.md`. |
 | Occupancy grid (2-D or 3-D) | Medium | ✅ Added `occupancy_grid.py` with `OccupancyGrid`; log-odds probabilistic updates, Bresenham ray-casting for free-space marking, configurable Z-height filter, ROS-compatible `int8` output (−1 unknown / 0 free / 100 occupied), coordinate conversion helpers, and `to_probability()`. See `docs/occupancy_grid.md`. |
-| Voxel map / TSDF (TSDFusion, VDB, etc.) | Medium | Memory-efficient volumetric representation used for dense reconstruction. |
+| Voxel map / TSDF volumetric representation | Medium | ✅ Added `voxel_map.py` with `TSDFVolume`; 3-D voxel grid with truncated SDF integration from point clouds + poses, running weighted-average fusion, surface extraction at the zero-crossing, and voxel/world coordinate helpers. Pure NumPy/SciPy. See `docs/voxel_map.md`. |
 | Map serialisation (PCD, PLY, or custom binary format) | Medium | No mechanism to save or load a built map. |
 | Map management (submap division, keyframe selection) | Low | Needed for large-scale or long-duration sessions. |
 
@@ -201,7 +201,7 @@ The following is a consolidated list of all identified gaps, ordered roughly by 
 - [X] Sliding-window / fixed-lag smoother for online SLAM
 - [X] Covariance tracking in `FramePose`
 - [X] Occupancy grid (2-D / 3-D)
-- [ ] Voxel map / TSDF volumetric representation
+- [X] Voxel map / TSDF volumetric representation
 - [ ] Map serialisation (PCD, PLY)
 - [X] LiDAR–camera overlay display utility
 
