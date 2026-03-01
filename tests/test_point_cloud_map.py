@@ -1,6 +1,8 @@
 """Tests for point_cloud_map: PointCloudMap accumulator and voxel downsampling."""
 
 import math
+import os
+import tempfile
 
 import numpy as np
 import pytest
@@ -429,3 +431,198 @@ class TestIntegration:
         m.voxel_downsample(voxel_size=0.5)
         assert len(m) <= before
         assert len(m) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Serialisation: PCD
+# ---------------------------------------------------------------------------
+
+
+class TestSavePcd:
+    def test_save_and_reload_no_color(self):
+        """Round-trip: save then load an uncoloured map via PCD."""
+        m = PointCloudMap()
+        pts = _random_scan(10, seed=60)
+        m.add_scan(pts, _identity())
+
+        with tempfile.NamedTemporaryFile(suffix=".pcd", delete=False) as f:
+            path = f.name
+        try:
+            m.save_pcd(path)
+            m2 = PointCloudMap.from_pcd(path)
+        finally:
+            os.unlink(path)
+
+        assert len(m2) == 10
+        np.testing.assert_allclose(m2.get_points(), m.get_points(), atol=1e-5)
+        assert m2.get_colors() is None
+
+    def test_save_and_reload_with_color(self):
+        """Round-trip: save then load a coloured map via PCD."""
+        m = PointCloudMap()
+        pts = _random_scan(8, seed=61)
+        clr = _random_colors_uint8(8, seed=61)
+        m.add_scan(pts, _identity(), colors=clr)
+
+        with tempfile.NamedTemporaryFile(suffix=".pcd", delete=False) as f:
+            path = f.name
+        try:
+            m.save_pcd(path)
+            m2 = PointCloudMap.from_pcd(path)
+        finally:
+            os.unlink(path)
+
+        assert len(m2) == 8
+        np.testing.assert_allclose(m2.get_points(), m.get_points(), atol=1e-5)
+        stored = m2.get_colors()
+        assert stored is not None
+        np.testing.assert_array_equal(stored, clr)
+
+    def test_save_empty_map_pcd(self):
+        """Saving an empty map should produce a valid zero-point PCD file."""
+        m = PointCloudMap()
+        with tempfile.NamedTemporaryFile(suffix=".pcd", delete=False) as f:
+            path = f.name
+        try:
+            m.save_pcd(path)
+            m2 = PointCloudMap.from_pcd(path)
+        finally:
+            os.unlink(path)
+        assert len(m2) == 0
+
+    def test_pcd_file_contains_header(self):
+        """The saved PCD file must include required header lines."""
+        m = PointCloudMap()
+        m.add_scan(_random_scan(3, seed=62), _identity())
+        with tempfile.NamedTemporaryFile(suffix=".pcd", delete=False, mode="w") as f:
+            path = f.name
+        try:
+            m.save_pcd(path)
+            content = open(path).read()
+        finally:
+            os.unlink(path)
+        assert "VERSION 0.7" in content
+        assert "DATA ascii" in content
+        assert "FIELDS x y z" in content
+
+    def test_from_pcd_non_ascii_raises(self):
+        """Loading a binary PCD file should raise ValueError."""
+        content = "# .PCD v0.7\nVERSION 0.7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nCOUNT 1 1 1\nWIDTH 1\nHEIGHT 1\nVIEWPOINT 0 0 0 1 0 0 0\nPOINTS 1\nDATA binary\n"
+        with tempfile.NamedTemporaryFile(suffix=".pcd", delete=False, mode="w") as f:
+            f.write(content)
+            path = f.name
+        try:
+            with pytest.raises(ValueError, match="ASCII"):
+                PointCloudMap.from_pcd(path)
+        finally:
+            os.unlink(path)
+
+    def test_from_pcd_missing_xyz_raises(self):
+        """Loading a PCD file without x/y/z fields should raise ValueError."""
+        content = "# .PCD v0.7\nVERSION 0.7\nFIELDS intensity\nSIZE 4\nTYPE F\nCOUNT 1\nWIDTH 0\nHEIGHT 1\nVIEWPOINT 0 0 0 1 0 0 0\nPOINTS 0\nDATA ascii\n"
+        with tempfile.NamedTemporaryFile(suffix=".pcd", delete=False, mode="w") as f:
+            f.write(content)
+            path = f.name
+        try:
+            with pytest.raises(ValueError, match="x/y/z"):
+                PointCloudMap.from_pcd(path)
+        finally:
+            os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# Serialisation: PLY
+# ---------------------------------------------------------------------------
+
+
+class TestSavePly:
+    def test_save_and_reload_no_color(self):
+        """Round-trip: save then load an uncoloured map via PLY."""
+        m = PointCloudMap()
+        pts = _random_scan(10, seed=70)
+        m.add_scan(pts, _identity())
+
+        with tempfile.NamedTemporaryFile(suffix=".ply", delete=False) as f:
+            path = f.name
+        try:
+            m.save_ply(path)
+            m2 = PointCloudMap.from_ply(path)
+        finally:
+            os.unlink(path)
+
+        assert len(m2) == 10
+        np.testing.assert_allclose(m2.get_points(), m.get_points(), atol=1e-5)
+        assert m2.get_colors() is None
+
+    def test_save_and_reload_with_color(self):
+        """Round-trip: save then load a coloured map via PLY."""
+        m = PointCloudMap()
+        pts = _random_scan(8, seed=71)
+        clr = _random_colors_uint8(8, seed=71)
+        m.add_scan(pts, _identity(), colors=clr)
+
+        with tempfile.NamedTemporaryFile(suffix=".ply", delete=False) as f:
+            path = f.name
+        try:
+            m.save_ply(path)
+            m2 = PointCloudMap.from_ply(path)
+        finally:
+            os.unlink(path)
+
+        assert len(m2) == 8
+        np.testing.assert_allclose(m2.get_points(), m.get_points(), atol=1e-5)
+        stored = m2.get_colors()
+        assert stored is not None
+        np.testing.assert_array_equal(stored, clr)
+
+    def test_save_empty_map_ply(self):
+        """Saving an empty map should produce a valid zero-vertex PLY file."""
+        m = PointCloudMap()
+        with tempfile.NamedTemporaryFile(suffix=".ply", delete=False) as f:
+            path = f.name
+        try:
+            m.save_ply(path)
+            m2 = PointCloudMap.from_ply(path)
+        finally:
+            os.unlink(path)
+        assert len(m2) == 0
+
+    def test_ply_file_contains_header(self):
+        """The saved PLY file must include the standard ply header."""
+        m = PointCloudMap()
+        m.add_scan(_random_scan(3, seed=72), _identity())
+        with tempfile.NamedTemporaryFile(suffix=".ply", delete=False, mode="w") as f:
+            path = f.name
+        try:
+            m.save_ply(path)
+            content = open(path).read()
+        finally:
+            os.unlink(path)
+        assert content.startswith("ply\n")
+        assert "format ascii 1.0" in content
+        assert "element vertex 3" in content
+        assert "end_header" in content
+
+    def test_from_ply_non_ascii_raises(self):
+        """Loading a binary PLY file should raise ValueError."""
+        content = "ply\nformat binary_little_endian 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nend_header\n"
+        with tempfile.NamedTemporaryFile(suffix=".ply", delete=False, mode="w") as f:
+            f.write(content)
+            path = f.name
+        try:
+            with pytest.raises(ValueError, match="ASCII"):
+                PointCloudMap.from_ply(path)
+        finally:
+            os.unlink(path)
+
+    def test_from_ply_missing_xyz_raises(self):
+        """Loading a PLY file without x/y/z vertex properties should raise."""
+        content = "ply\nformat ascii 1.0\nelement vertex 1\nproperty float intensity\nend_header\n1.0\n"
+        with tempfile.NamedTemporaryFile(suffix=".ply", delete=False, mode="w") as f:
+            f.write(content)
+            path = f.name
+        try:
+            with pytest.raises(ValueError, match="x/y/z"):
+                PointCloudMap.from_ply(path)
+        finally:
+            os.unlink(path)

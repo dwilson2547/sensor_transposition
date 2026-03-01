@@ -121,6 +121,49 @@ pcd_map = PointCloudMap(max_points=5_000_000)   # ~190 MB at float64
 
 ---
 
+## Map Serialisation
+
+### Saving
+
+`save_pcd(path)` writes an ASCII PCD (version 0.7) file, compatible with
+the [Point Cloud Library (PCL)](https://pointclouds.org/) and most
+point-cloud viewers:
+
+```python
+pcd_map.save_pcd("map.pcd")
+```
+
+`save_ply(path)` writes an ASCII PLY file, compatible with CloudCompare,
+MeshLab, and Open3D:
+
+```python
+pcd_map.save_ply("map.ply")
+```
+
+Both formats include per-point RGB colour when present.
+
+### Loading
+
+Previously saved maps can be reloaded as a new `PointCloudMap` instance:
+
+```python
+from sensor_transposition.point_cloud_map import PointCloudMap
+
+# Reload from PCD
+map_pcd = PointCloudMap.from_pcd("map.pcd")
+
+# Reload from PLY
+map_ply = PointCloudMap.from_ply("map.ply")
+
+print(f"Loaded {len(map_pcd):,} points from PCD.")
+print(f"Loaded {len(map_ply):,} points from PLY.")
+```
+
+> **Note:** Only ASCII-encoded files are supported.  Binary PCD or binary
+> PLY files will raise `ValueError`.
+
+---
+
 ## API Reference
 
 ### `PointCloudMap`
@@ -131,6 +174,10 @@ pcd_map = PointCloudMap(max_points=5_000_000)   # ~190 MB at float64
 | `get_points()` | Return a copy of the accumulated `(N, 3)` float64 world-frame points. |
 | `get_colors()` | Return a copy of the accumulated `(N, 3)` uint8 RGB colours, or `None`. |
 | `voxel_downsample(voxel_size)` | Downsample the map in place using a voxel grid filter. |
+| `save_pcd(path)` | Save the map to an ASCII PCD file (PCL-compatible, v0.7). |
+| `save_ply(path)` | Save the map to an ASCII PLY file (compatible with CloudCompare, MeshLab, Open3D). |
+| `from_pcd(path)` *(classmethod)* | Load a map from an ASCII PCD file. |
+| `from_ply(path)` *(classmethod)* | Load a map from an ASCII PLY file. |
 | `clear()` | Remove all accumulated points and colours. |
 | `__len__()` | Number of points currently stored. |
 
