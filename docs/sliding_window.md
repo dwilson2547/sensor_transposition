@@ -157,6 +157,31 @@ if score < 0.2:
     )
 ```
 
+### Recovering the full trajectory for very long runs
+
+For arbitrarily long trajectories the active window contains only the most
+recent `window_size` keyframes.  Access the complete history via
+`marginalised_poses` or `full_trajectory()`:
+
+```python
+smoother = SlidingWindowSmoother(window_size=10)
+
+# ... run for thousands of keyframes ...
+
+# Inspect all poses that have been evicted from the window.
+for node_id, pose in smoother.marginalised_poses.items():
+    print(node_id, pose["translation"])
+
+# Get the entire trajectory in one call (marginalised + active nodes).
+full_traj = smoother.full_trajectory()
+for node_id in sorted(full_traj):
+    t = full_traj[node_id]["translation"]
+    print(f"node {node_id:5d}  ({t[0]:.2f}, {t[1]:.2f}, {t[2]:.2f})")
+```
+
+The `full_trajectory()` dict can be fed directly into `PointCloudMap`,
+`FramePoseSequence`, or any other component that accepts world-frame poses.
+
 ---
 
 ## API Reference
@@ -186,6 +211,7 @@ SlidingWindowSmoother(
 | `window_size` | `int` | Maximum number of active nodes. |
 | `active_node_ids` | `list[int]` | Ordered list of currently active node IDs (oldest first). |
 | `latest_result` | `OptimizationResult \| None` | Result from the most recent `optimize()` call. |
+| `marginalised_poses` | `dict[int, dict]` | World-frame poses of all nodes evicted from the window (historical record). |
 
 #### `add_node(node_id, *, translation=None, quaternion=None, transform=None)`
 
@@ -206,6 +232,25 @@ endpoint is no longer active.
 Optimise the active window.  Returns an
 [`OptimizationResult`](./pose_graph_optimisation.md) with poses for the
 active nodes only.
+
+#### `marginalised_poses → dict[int, dict]`
+
+Read-only property.  Maps every node ID that has been evicted from the window
+to a dict with keys `"translation"`, `"quaternion"`, and `"transform"`,
+preserving each node's last optimised world-frame pose at the time of
+eviction.  The dict grows monotonically as nodes are marginalised and is
+never modified retroactively.
+
+Useful for building a complete map or trajectory log without keeping all
+nodes in memory at once.
+
+#### `full_trajectory() → dict[int, dict]`
+
+Returns the complete trajectory across the entire run: the union of
+:attr:`marginalised_poses` (historical nodes) and the current active-window
+poses (updated after the latest `optimize()` call).  Each entry has the same
+`"translation"` / `"quaternion"` / `"transform"` keys as `marginalised_poses`
+and `OptimizationResult`.
 
 ---
 

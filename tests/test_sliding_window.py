@@ -334,3 +334,115 @@ class TestMarginalisation:
         """The internal anchor node must never appear in active_node_ids."""
         s, _ = _build_chain(n_nodes=10, window_size=3)
         assert _ANCHOR_ID not in s.active_node_ids
+
+
+# ---------------------------------------------------------------------------
+# marginalised_poses & full_trajectory — long-trajectory recovery
+# ---------------------------------------------------------------------------
+
+
+class TestLongTrajectoryRecovery:
+    def test_marginalised_poses_empty_before_overflow(self):
+        """No marginalised poses before the window overflows."""
+        s = SlidingWindowSmoother(window_size=5)
+        for i in range(4):
+            s.add_node(i)
+        assert s.marginalised_poses == {}
+
+    def test_marginalised_poses_grows_after_overflow(self):
+        """One pose is marginalised each time the window overflows."""
+        s = SlidingWindowSmoother(window_size=3)
+        for i in range(6):
+            s.add_node(i)
+        # Window size 3, 6 nodes added → 3 nodes evicted.
+        assert len(s.marginalised_poses) == 3
+        assert 0 in s.marginalised_poses
+        assert 1 in s.marginalised_poses
+        assert 2 in s.marginalised_poses
+
+    def test_marginalised_poses_has_expected_keys(self):
+        """Each entry in marginalised_poses must have the standard pose keys."""
+        s = SlidingWindowSmoother(window_size=2)
+        for i in range(3):
+            s.add_node(i, translation=[float(i), 0.0, 0.0])
+        pose = s.marginalised_poses[0]
+        assert "translation" in pose
+        assert "quaternion" in pose
+        assert "transform" in pose
+        assert pose["transform"].shape == (4, 4)
+
+    def test_marginalised_poses_does_not_contain_active_nodes(self):
+        """Active nodes must not appear in marginalised_poses."""
+        s, _ = _build_chain(n_nodes=10, window_size=4)
+        active = set(s.active_node_ids)
+        marginalised = set(s.marginalised_poses.keys())
+        assert active.isdisjoint(marginalised)
+
+    def test_marginalised_poses_returns_copy(self):
+        """Mutations to the returned dict must not affect internal state."""
+        s = SlidingWindowSmoother(window_size=2)
+        for i in range(3):
+            s.add_node(i, translation=[float(i), 0.0, 0.0])
+        mp1 = s.marginalised_poses
+        mp1[0]["translation"][0] = 999.0  # mutate the returned copy
+        mp2 = s.marginalised_poses
+        assert mp2[0]["translation"][0] != 999.0
+
+    def test_full_trajectory_covers_all_nodes(self):
+        """full_trajectory must contain every node ever added."""
+        n, w = 15, 5
+        smoother, _ = _build_chain(n_nodes=n, window_size=w)
+        traj = smoother.full_trajectory()
+        assert len(traj) == n
+        for i in range(n):
+            assert i in traj
+
+    def test_full_trajectory_positions_accurate(self):
+        """full_trajectory should return approximately correct x positions."""
+        n, w, step = 12, 4, 2.0
+        smoother = SlidingWindowSmoother(window_size=w)
+        T_step = _translation_tf(step)
+        info = np.eye(6) * 1000.0
+        for i in range(n):
+            smoother.add_node(i, translation=[float(i) * step, 0.0, 0.0])
+            if i > 0:
+                smoother.add_edge(i - 1, i, transform=T_step, information=info)
+            smoother.optimize()
+
+        traj = smoother.full_trajectory()
+        for i in range(n):
+            expected_x = float(i) * step
+            actual_x = traj[i]["translation"][0]
+            assert abs(actual_x - expected_x) < 1.0, (
+                f"Node {i}: expected x≈{expected_x:.1f}, got {actual_x:.4f}"
+            )
+
+    def test_full_trajectory_has_expected_keys(self):
+        """Each entry returned by full_trajectory must have the standard keys."""
+        s, _ = _build_chain(n_nodes=8, window_size=3)
+        traj = s.full_trajectory()
+        for nid, pose in traj.items():
+            assert "translation" in pose, f"Node {nid} missing 'translation'"
+            assert "quaternion" in pose, f"Node {nid} missing 'quaternion'"
+            assert "transform" in pose, f"Node {nid} missing 'transform'"
+            assert pose["transform"].shape == (4, 4), (
+                f"Node {nid} transform has shape {pose['transform'].shape}"
+            )
+
+    def test_full_trajectory_no_anchor_node(self):
+        """The internal anchor node must never appear in full_trajectory."""
+        s, _ = _build_chain(n_nodes=10, window_size=3)
+        traj = s.full_trajectory()
+        assert _ANCHOR_ID not in traj
+
+    def test_marginalised_count_equals_total_minus_window(self):
+        """After N nodes and window w, exactly max(0, N-w) should be marginalised."""
+        for n, w in [(5, 5), (10, 4), (7, 3), (3, 10)]:
+            smoother = SlidingWindowSmoother(window_size=w)
+            for i in range(n):
+                smoother.add_node(i)
+            expected = max(0, n - w)
+            assert len(smoother.marginalised_poses) == expected, (
+                f"n={n}, w={w}: expected {expected} marginalised, "
+                f"got {len(smoother.marginalised_poses)}"
+            )
