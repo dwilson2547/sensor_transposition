@@ -31,6 +31,7 @@ from sensor_transposition import wheel_odometry
 from sensor_transposition import sliding_window
 from sensor_transposition import occupancy_grid
 from sensor_transposition import voxel_map
+from sensor_transposition import submap_manager
 
 __all__ = [
     "SensorCollection",
@@ -64,4 +65,5 @@ __all__ = [
     "sliding_window",
     "occupancy_grid",
     "voxel_map",
+    "submap_manager",
 ]
