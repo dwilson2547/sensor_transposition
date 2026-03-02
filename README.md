@@ -17,11 +17,29 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
   - [LiDAR–Camera Fusion](#lidar-camera-fusion)
   - [LiDAR Parsers](#lidar-parsers)
   - [LiDAR Scan Matching](#lidar-scan-matching)
+  - [LiDAR Motion Distortion Correction](#lidar-motion-distortion-correction)
   - [GPS / GNSS](#gps--gnss)
   - [GPS Coordinate-Frame Converter](#gps-coordinate-frame-converter)
+  - [GPS Fusion](#gps-fusion)
   - [IMU](#imu)
+  - [IMU Error-State EKF](#imu-error-state-ekf)
+  - [IMU Pre-integration](#imu-pre-integration)
   - [Radar](#radar)
+  - [Radar Odometry](#radar-odometry)
+  - [Visual Odometry](#visual-odometry)
+  - [Wheel Odometry](#wheel-odometry)
+  - [Loop Closure](#loop-closure)
+  - [Pose Graph](#pose-graph)
+  - [Sliding-Window Smoother](#sliding-window-smoother)
+  - [Submap Manager](#submap-manager)
+  - [Occupancy Grid](#occupancy-grid)
+  - [Voxel Map (TSDF)](#voxel-map-tsdf)
+  - [Point-Cloud Map](#point-cloud-map)
+  - [Visualisation](#visualisation)
+  - [Bag Recorder / Player](#bag-recorder--player)
+  - [Camera–LiDAR Extrinsic Calibration](#cameralidar-extrinsic-calibration)
 - [Configuration Example](#configuration-example)
+- [Quick-Start: End-to-End SLAM Pipeline](#quick-start-end-to-end-slam-pipeline)
 - [ROS Examples](#ros-examples)
 
 ---
@@ -35,9 +53,26 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
 - **LiDAR–camera fusion** – project 3-D LiDAR point clouds onto a camera image plane and colour the cloud by sampling pixel values.
 - **LiDAR parsers** – binary readers for Velodyne (KITTI `.bin`), Ouster (4-column and 8-column `.bin`), and Livox (LVX / LVX2) file formats.
 - **LiDAR scan matching** – point-to-point ICP (Iterative Closest Point) with the Kabsch SVD algorithm and a KD-tree nearest-neighbour search; supports a maximum correspondence-distance filter, an optional initial transform, and a configurable convergence tolerance.
+- **LiDAR motion distortion correction** – IMU-based scan deskewing that corrects per-point timestamps across a spinning LiDAR sweep.
 - **GPS / GNSS** – NMEA 0183 parser supporting GGA and RMC sentence types, plus a coordinate-frame converter for ECEF ↔ ENU and geodetic ↔ UTM conversions.
+- **GPS fusion** – `GpsFuser` converts GPS fixes to local ENU and integrates them into an `ImuEkf` state or a `FramePoseSequence`; `hdop_to_noise` converts HDOP to a 3×3 position noise covariance.
 - **IMU** – binary parser for 32-byte (accel + gyro) and 48-byte (accel + gyro + quaternion) records.
+- **IMU Error-State EKF** – 15-state error-state extended Kalman filter fusing IMU, GPS, and pose observations.
+- **IMU pre-integration** – accumulates raw IMU measurements between keyframes into compact (ΔR, Δv, Δp) increments for tight IMU–LiDAR coupling.
 - **Radar** – binary parser for 5-field (range, azimuth, elevation, velocity, SNR) detection records with spherical → Cartesian conversion.
+- **Radar odometry** – Doppler-based ego-velocity estimation and scan-to-scan ICP radar odometry.
+- **Visual odometry** – essential-matrix estimation (normalised 8-point + RANSAC), pose recovery, and Perspective-n-Point (PnP) solver.
+- **Wheel odometry** – differential-drive and Ackermann (bicycle-model) dead-reckoning with midpoint integration.
+- **Loop closure** – Scan Context and M2DP place-recognition descriptors with `ScanContextDatabase` for efficient loop-closure candidate retrieval.
+- **Pose graph** – pose graph data structure and Gauss-Newton optimisation back-end for graph-SLAM.
+- **Sliding-window smoother** – fixed-lag online SLAM smoother that bounds per-step cost to O(window_size³).
+- **Submap manager** – keyframe selection and submap division for large-scale long-duration SLAM.
+- **Occupancy grid** – 2-D probabilistic occupancy grid with log-odds ray-casting; exports to ROS `nav_msgs/OccupancyGrid` int8 format.
+- **Voxel map (TSDF)** – Truncated Signed-Distance Function volumetric map for dense 3-D reconstruction.
+- **Point-cloud map** – accumulated coloured point-cloud map with voxel-grid downsampling and PCD / PLY I/O.
+- **Visualisation** – BEV rendering, trajectory overlay, LiDAR-on-image overlay, Open3D and RViz export helpers.
+- **Bag recorder / player** – lightweight multi-topic binary bag format (`.sbag`) with streaming write and indexed playback; no external dependencies.
+- **Camera–LiDAR extrinsic calibration** – target-based extrinsic calibration using plane correspondences (`fit_plane`, `ransac_plane`, `calibrate_lidar_camera`).
 - **ROS examples** – ready-to-use launch / parameter files for Velodyne and Ouster LiDARs in both ROS 1 and ROS 2.
 
 ---
@@ -329,6 +364,38 @@ The returned `IcpResult` contains:
 
 ---
 
+### LiDAR Motion Distortion Correction
+
+Correct per-point motion distortion in a spinning LiDAR scan using IMU data.
+
+```python
+from sensor_transposition.lidar.motion_distortion import deskew_scan
+from sensor_transposition.imu.imu import ImuParser
+
+imu_data  = ImuParser("imu.bin").read()
+imu_times = imu_data["timestamp"].astype(float)
+accel     = imu_data[["ax", "ay", "az"]].view(float).reshape(-1, 3).astype(float)
+gyro      = imu_data[["wx", "wy", "wz"]].view(float).reshape(-1, 3).astype(float)
+
+# per_point_timestamps: (N,) float array in the same clock as the IMU
+# ref_timestamp: the scan's reference time (start or end of sweep)
+deskewed = deskew_scan(
+    points=lidar_scan,
+    per_point_timestamps=per_point_timestamps,
+    imu_timestamps=imu_times,
+    imu_accel=accel,
+    imu_gyro=gyro,
+    ref_timestamp=sweep_end_time,
+)
+```
+
+Both `per_point_timestamps` and `ref_timestamp` must be in the same reference
+clock as the IMU (apply `apply_time_offset` from `sync.py` first if needed).
+`ref_timestamp` is typically the **end** of the sweep so that the corrected
+cloud represents the sensor pose at the time the last point was captured.
+
+---
+
 ### GPS / GNSS
 
 Parse NMEA 0183 log files (GGA and RMC sentences).
@@ -411,6 +478,46 @@ lat, lon = utm_to_geodetic(easting, northing, zone_number, zone_letter)
 
 ---
 
+### GPS Fusion
+
+Integrate GPS fixes into the local ENU map frame used by the SLAM pipeline.
+
+```python
+from sensor_transposition.gps.fusion import GpsFuser, hdop_to_noise
+from sensor_transposition.gps.nmea import NmeaParser
+from sensor_transposition.imu.ekf import ImuEkf, EkfState
+from sensor_transposition.frame_pose import FramePoseSequence
+
+# Load GPS fixes.
+fixes = NmeaParser("gps_log.nmea").gga_fixes()
+
+# 1. Anchor the local ENU map frame to the first valid fix.
+origin = fixes[0]
+fuser = GpsFuser(
+    ref_lat=origin.latitude,
+    ref_lon=origin.longitude,
+    ref_alt=origin.altitude,
+)
+
+# 2. Fuse all fixes into a FramePoseSequence (GPS-only trajectory).
+seq = FramePoseSequence()
+for i, fix in enumerate(fixes):
+    fuser.fuse_into_sequence(seq, timestamp=float(i) * 0.1, fix=fix)
+
+# 3. Fuse GPS into a running EKF state (after IMU prediction steps).
+ekf   = ImuEkf()
+state = EkfState()
+for fix in fixes:
+    noise = hdop_to_noise(fix.hdop)   # 3×3 ENU position covariance
+    state = fuser.fuse_into_ekf(ekf, state, fix, noise)
+```
+
+`hdop_to_noise(hdop)` converts the HDOP field from a GGA sentence into a 3×3
+diagonal ENU position noise covariance matrix, ready to pass to
+`ImuEkf.position_update`.
+
+---
+
 ### IMU
 
 Parse binary IMU data files.
@@ -432,6 +539,57 @@ Two record formats are auto-detected by file size:
 
 ---
 
+### IMU Error-State EKF
+
+15-state Error-State Extended Kalman Filter (ES-EKF) for fusing IMU with GPS
+and pose observations.
+
+```python
+from sensor_transposition.imu.ekf import ImuEkf, EkfState
+import numpy as np
+
+ekf   = ImuEkf(gyro_noise=1e-4, accel_noise=1e-3)
+state = EkfState()   # starts at origin, zero velocity, identity orientation
+
+# Predict with IMU sample
+accel = np.array([0.0, 0.0, 9.81])  # m/s²
+gyro  = np.array([0.0, 0.0, 0.01])  # rad/s
+dt    = 0.01                          # seconds
+state = ekf.predict(state, accel, gyro, dt)
+
+# Update with a GPS position observation
+z_pos   = np.array([1.0, 0.0, 0.0])  # ENU position (metres)
+R_noise = np.eye(3) * 0.25           # 3×3 position noise covariance
+state   = ekf.position_update(state, z_pos, R_noise)
+```
+
+The 15-D error state is ``[δp (3), δv (3), δθ (3), δba (3), δbg (3)]``.
+See `docs/state_estimation.md` for a full derivation.
+
+---
+
+### IMU Pre-integration
+
+Accumulate raw IMU measurements between two keyframe timestamps into compact
+``(ΔR, Δv, Δp)`` relative-motion increments.
+
+```python
+from sensor_transposition.imu.preintegration import ImuPreintegrator
+import numpy as np
+
+integrator = ImuPreintegrator()
+
+for accel, gyro, dt in imu_samples:
+    integrator.integrate(accel, gyro, dt)
+
+result = integrator.get_result()
+print("ΔR:\n", result.delta_rotation)   # (3, 3) rotation matrix
+print("Δv:", result.delta_velocity)      # (3,)   m/s
+print("Δp:", result.delta_position)      # (3,)   metres
+```
+
+---
+
 ### Radar
 
 Parse binary radar detection files.
@@ -445,6 +603,385 @@ xyz        = parser.xyz()    # (N, 3) Cartesian float32 converted from spherical
 ```
 
 Each 20-byte record contains: `range` (m), `azimuth` (°), `elevation` (°), `velocity` (m/s, negative = approaching), `snr` (dB).
+
+---
+
+### Radar Odometry
+
+Estimate ego-velocity from Doppler measurements, or run scan-to-scan ICP
+radar odometry.
+
+```python
+from sensor_transposition.radar.radar import RadarParser
+from sensor_transposition.radar.radar_odometry import (
+    estimate_ego_velocity,
+    RadarOdometer,
+)
+
+# Doppler-based ego-velocity (single frame)
+detections = RadarParser("frame.bin").read()
+result = estimate_ego_velocity(detections, min_snr=10.0)
+if result.valid:
+    print("Ego velocity (m/s):", result.velocity)   # (3,) m/s
+
+# Scan-to-scan odometry over a sequence
+odom = RadarOdometer()
+for path in sorted(frame_paths):
+    xyz = RadarParser(path).xyz()
+    step = odom.update(xyz)
+    if step is not None:
+        print("Relative transform:\n", step.transform)
+```
+
+---
+
+### Visual Odometry
+
+Essential-matrix estimation, pose recovery, and Perspective-n-Point (PnP)
+solver for monocular or stereo visual odometry.
+
+```python
+from sensor_transposition.visual_odometry import (
+    estimate_essential_matrix,
+    recover_pose_from_essential,
+    solve_pnp,
+)
+
+# 1. Estimate E from matched pixel pairs (same camera)
+result = estimate_essential_matrix(pts1, pts2, K)
+E, mask = result.essential_matrix, result.inlier_mask
+
+# 2. Recover relative camera pose
+R, t = recover_pose_from_essential(E, pts1[mask], pts2[mask], K)
+
+# 3. Estimate absolute pose from 3-D / 2-D correspondences
+pnp = solve_pnp(points_3d, pixels_2d, K)
+if pnp.success:
+    print("R:\n", pnp.rotation)
+    print("t:", pnp.translation)
+```
+
+---
+
+### Wheel Odometry
+
+Dead-reckoning pose estimation for differential-drive and Ackermann vehicles.
+
+```python
+from sensor_transposition.wheel_odometry import (
+    DifferentialDriveOdometer,
+    AckermannOdometer,
+)
+
+# Differential drive (encoder ticks)
+odom = DifferentialDriveOdometer(wheel_base=0.54, wheel_radius=0.1)
+result = odom.integrate(timestamps, left_ticks, right_ticks,
+                        ticks_per_revolution=360)
+print(result.x, result.y, result.theta)   # SE(2) pose
+
+# Ackermann / bicycle model
+odom = AckermannOdometer(wheel_base=2.7)
+result = odom.integrate(timestamps, speeds, steering_angles)
+print(result.x, result.y, result.theta)
+```
+
+---
+
+### Loop Closure
+
+Place recognition using Scan Context and M2DP descriptors.
+
+```python
+from sensor_transposition.loop_closure import (
+    compute_scan_context,
+    compute_m2dp,
+    ScanContextDatabase,
+)
+
+db = ScanContextDatabase(num_rings=20, num_sectors=60, max_range=80.0)
+
+for frame_id, cloud in enumerate(lidar_frames):
+    desc = compute_scan_context(cloud, num_rings=20, num_sectors=60,
+                                max_range=80.0)
+    candidates = db.query(desc, top_k=1)
+    db.add(desc, frame_id=frame_id)
+
+    if candidates and candidates[0].distance < 0.15:
+        loop_from = candidates[0].match_frame_id
+        print(f"Loop closure: {frame_id} ↔ {loop_from}, "
+              f"d={candidates[0].distance:.3f}")
+
+# M2DP as a viewpoint-insensitive alternative
+from sensor_transposition.loop_closure import m2dp_distance
+desc_a = compute_m2dp(cloud_a)
+desc_b = compute_m2dp(cloud_b)
+print("M2DP distance:", m2dp_distance(desc_a, desc_b))
+```
+
+---
+
+### Pose Graph
+
+Pose graph construction and Gauss-Newton optimisation for graph-SLAM.
+
+```python
+from sensor_transposition.pose_graph import PoseGraph, optimize_pose_graph
+import numpy as np
+
+graph = PoseGraph()
+
+# Add keyframe nodes
+for i, (t, q) in enumerate(zip(translations, quaternions)):
+    graph.add_node(i, translation=t, quaternion=q)
+
+# Add odometry edges from ICP
+for i in range(len(translations) - 1):
+    result = icp_align(clouds[i], clouds[i + 1])
+    graph.add_edge(from_id=i, to_id=i + 1,
+                   transform=result.transform,
+                   information=np.eye(6) * 100.0)
+
+# Add a loop-closure edge
+graph.add_edge(from_id=loop_from, to_id=loop_to,
+               transform=loop_transform,
+               information=np.eye(6) * 50.0)
+
+opt = optimize_pose_graph(graph)
+if opt.success:
+    for node_id, pose in opt.optimized_poses.items():
+        print(node_id, pose["translation"])
+```
+
+---
+
+### Sliding-Window Smoother
+
+Fixed-lag online SLAM smoother that keeps only the most recent `window_size`
+keyframes in the active optimisation window.
+
+```python
+from sensor_transposition.sliding_window import SlidingWindowSmoother
+import numpy as np
+
+smoother = SlidingWindowSmoother(window_size=5)
+
+for i, (trans, rel_tf) in enumerate(keyframe_stream):
+    smoother.add_node(i, translation=trans)
+    if i > 0:
+        smoother.add_edge(i - 1, i, transform=rel_tf,
+                          information=np.eye(6) * 200.0)
+    result = smoother.optimize()
+    if result.success:
+        print(f"Node {i}: {result.optimized_poses[i]['translation']}")
+```
+
+---
+
+### Submap Manager
+
+Keyframe selection and submap division for large-scale or long-duration SLAM.
+
+```python
+from sensor_transposition.submap_manager import KeyframeSelector, SubmapManager
+import numpy as np
+
+selector = KeyframeSelector(translation_threshold=1.0,
+                            rotation_threshold_deg=10.0)
+manager  = SubmapManager(max_keyframes_per_submap=20, overlap=2)
+
+for frame_id, (pose, scan) in enumerate(zip(frame_poses, lidar_scans)):
+    if selector.check_and_accept(pose.transform):
+        manager.add_keyframe(frame_id, pose.transform, scan)
+
+submaps = manager.get_all_submaps()
+print(f"Created {len(submaps)} submaps.")
+```
+
+---
+
+### Occupancy Grid
+
+2-D probabilistic occupancy grid built from LiDAR scans using log-odds
+ray-casting.
+
+```python
+from sensor_transposition.occupancy_grid import OccupancyGrid
+import numpy as np
+
+grid = OccupancyGrid(
+    resolution=0.10,                    # 10 cm/cell
+    width=200, height=200,              # 20 m × 20 m
+    origin=np.array([-10.0, -10.0]),    # world coords of cell (0, 0)
+)
+
+for frame_pose, lidar_scan in zip(trajectory, scans):
+    sensor_origin = frame_pose.transform[:3, 3]
+    grid.insert_scan(lidar_scan, frame_pose.transform, sensor_origin)
+
+occupancy = grid.get_grid()       # (height, width) int8 — ROS convention
+probs     = grid.to_probability() # (height, width) float64 in [0, 1]
+
+# ROS nav_msgs/OccupancyGrid compatibility:
+# grid.to_ros_int8() returns a 2-D int8 array using the ROS convention:
+#   -1 = unknown,  0 = free,  100 = occupied
+ros_grid = grid.to_ros_int8()
+```
+
+---
+
+### Voxel Map (TSDF)
+
+Truncated Signed-Distance Function (TSDF) volumetric map for dense 3-D
+reconstruction.
+
+```python
+import numpy as np
+from sensor_transposition.voxel_map import TSDFVolume
+
+volume = TSDFVolume(
+    voxel_size=0.10,
+    origin=np.array([-10.0, -10.0, -0.5]),
+    dims=(200, 200, 50),   # 200×200×50 voxels
+)
+
+for frame_pose, lidar_scan in zip(trajectory, scans):
+    volume.integrate(lidar_scan, frame_pose.transform)
+
+surface_pts  = volume.extract_surface_points(threshold=0.1)
+tsdf_array   = volume.get_tsdf()     # (nx, ny, nz) float64; NaN = unseen
+weight_array = volume.get_weights()  # (nx, ny, nz) float64
+```
+
+---
+
+### Point-Cloud Map
+
+Accumulated coloured point-cloud map assembled from successive LiDAR scans,
+with voxel-grid downsampling and PCD / PLY file I/O.
+
+```python
+from sensor_transposition.point_cloud_map import PointCloudMap
+
+pcd_map = PointCloudMap()
+
+for frame_pose, lidar_scan in zip(trajectory, scans):
+    pcd_map.add_scan(lidar_scan, frame_pose.transform)
+
+# Downsample to 10-cm voxels
+pcd_map.voxel_downsample(voxel_size=0.10)
+
+world_points = pcd_map.get_points()   # (N, 3) float64
+world_colors = pcd_map.get_colors()   # (N, 3) uint8, or None
+
+# Save / load
+pcd_map.save_pcd("map.pcd")
+pcd_map.save_ply("map.ply")
+loaded = PointCloudMap.from_pcd("map.pcd")
+```
+
+---
+
+### Visualisation
+
+BEV rendering, trajectory overlay, LiDAR-on-image overlay, and export helpers
+for Open3D and RViz.  All renderers return plain NumPy `uint8` RGB arrays.
+
+```python
+from sensor_transposition.visualisation import (
+    render_birdseye_view,
+    render_trajectory_birdseye,
+    overlay_lidar_on_image,
+    export_point_cloud_open3d,
+    SensorFrameVisualiser,
+)
+
+# Bird's-eye view of the accumulated map
+bev = render_birdseye_view(map_points, resolution=0.10)
+
+# Overlay depth-coded LiDAR on a camera image
+from sensor_transposition.lidar_camera import project_lidar_to_image
+pixel_coords, valid = project_lidar_to_image(lidar_scan, T, K, W, H)
+depth   = lidar_scan[:, 0]
+overlay = overlay_lidar_on_image(camera_image, pixel_coords, valid, depth)
+
+# Per-frame container for combined rendering
+vis = SensorFrameVisualiser()
+vis.set_point_cloud(lidar_scan)
+vis.set_camera_image(camera_image)
+bev_frame = vis.render_birdseye(resolution=0.10)
+
+# Export for Open3D
+o3d_dict = export_point_cloud_open3d(map_points)
+```
+
+---
+
+### Bag Recorder / Player
+
+Lightweight multi-topic binary bag format (`.sbag`) for recording and replaying
+multi-sensor data.  No external dependencies — pure Python standard library.
+
+```python
+from sensor_transposition.rosbag import BagWriter, BagReader
+
+# Record
+with BagWriter("session.sbag") as bag:
+    bag.write("/lidar/points", timestamp, {"xyz": lidar_pts.tolist()})
+    bag.write("/imu/data",     timestamp, {"accel": a.tolist(),
+                                           "gyro":  g.tolist()})
+
+# Replay
+with BagReader("session.sbag") as bag:
+    print("Topics:", bag.topics)
+    for msg in bag.read_messages(topics=["/lidar/points"]):
+        xyz = msg.data["xyz"]
+```
+
+The `.sbag` extension stands for **sensor bag**.  Each message record stores a
+UTF-8 JSON payload, so files can be inspected with any text editor after
+stripping the binary header.  See `docs/rosbag.md` for the full format
+specification.
+
+---
+
+### Camera–LiDAR Extrinsic Calibration
+
+Target-based extrinsic calibration using plane correspondences observed from
+both the camera and the LiDAR.
+
+```python
+from sensor_transposition.calibration import (
+    fit_plane,
+    ransac_plane,
+    calibrate_lidar_camera,
+)
+# Also importable directly from sensor_transposition:
+from sensor_transposition import fit_plane, ransac_plane, calibrate_lidar_camera
+import numpy as np
+
+# For each pose of a planar calibration target:
+lidar_normals    = []
+lidar_distances  = []
+camera_normals   = []
+camera_distances = []
+
+# LiDAR side — fit a plane to the board region
+normal, dist, inliers = ransac_plane(board_lidar_pts, distance_threshold=0.02)
+lidar_normals.append(normal)
+lidar_distances.append(dist)
+
+# Camera side — use a PnP solver (e.g. cv2.solvePnP) to obtain the
+# board normal and signed distance in the camera frame, then append.
+
+# Solve for the 4×4 LiDAR → camera transform (need ≥ 3 observations)
+T_lidar_to_cam = calibrate_lidar_camera(
+    np.array(lidar_normals),   np.array(lidar_distances),
+    np.array(camera_normals),  np.array(camera_distances),
+)
+```
+
+See [`docs/camera_lidar_extrinsic_calibration.md`](docs/camera_lidar_extrinsic_calibration.md)
+for a complete worked example including the camera-side PnP procedure.
 
 ---
 
@@ -480,6 +1017,30 @@ sensors:
       height: 1224
       distortion_coefficients: [-0.05, 0.08, 0.0, 0.0, -0.03]
 ```
+
+---
+
+## Quick-Start: End-to-End SLAM Pipeline
+
+[`examples/slam_pipeline.py`](examples/slam_pipeline.py) demonstrates a
+complete offline SLAM pipeline using **synthetic** (randomly generated) data,
+so it runs immediately without any real sensor hardware:
+
+```
+python examples/slam_pipeline.py
+```
+
+The script walks through each stage of the pipeline:
+
+1. **Generate** synthetic LiDAR scans and IMU samples.
+2. **Record** data to a `.sbag` file with `BagWriter`.
+3. **Replay** the bag with `BagReader` and extract LiDAR scans.
+4. **ICP odometry** – align consecutive scans with `icp_align`.
+5. **Loop closure** – detect revisits with `ScanContextDatabase`.
+6. **Pose graph optimisation** – correct accumulated drift with
+   `optimize_pose_graph`.
+7. **Map accumulation** – build a `PointCloudMap` from optimised poses and
+   save it as a `.pcd` file.
 
 ---
 
