@@ -534,7 +534,55 @@ class SensorCollection:
     def from_yaml(cls, path: str | os.PathLike) -> "SensorCollection":
         """Load a SensorCollection from a YAML file."""
         raw = yaml.safe_load(Path(path).read_text())
-        return cls.from_dict(raw)
+        collection = cls.from_dict(raw)
+        collection.validate()
+        return collection
+
+    def validate(self) -> None:
+        """Validate that all sensors have the required fields for their type.
+
+        Checks type-specific required fields:
+
+        * ``camera`` sensors must have an ``intrinsics`` block with positive
+          ``fx``, ``fy``, and positive ``width`` / ``height``.
+
+        Raises:
+            ValueError: If any sensor fails validation, with a message
+                identifying the offending sensor and missing / invalid field.
+
+        Example::
+
+            collection = SensorCollection.from_dict(data)
+            collection.validate()   # raises ValueError if invalid
+        """
+        for name, sensor in self._sensors.items():
+            if sensor.sensor_type == "camera":
+                if sensor.intrinsics is None:
+                    raise ValueError(
+                        f"Camera sensor '{name}' is missing a required "
+                        "'intrinsics' block."
+                    )
+                ci = sensor.intrinsics
+                if ci.fx <= 0.0:
+                    raise ValueError(
+                        f"Camera sensor '{name}': intrinsics.fx must be "
+                        f"positive, got {ci.fx}."
+                    )
+                if ci.fy <= 0.0:
+                    raise ValueError(
+                        f"Camera sensor '{name}': intrinsics.fy must be "
+                        f"positive, got {ci.fy}."
+                    )
+                if ci.width <= 0:
+                    raise ValueError(
+                        f"Camera sensor '{name}': intrinsics.width must be "
+                        f"positive, got {ci.width}."
+                    )
+                if ci.height <= 0:
+                    raise ValueError(
+                        f"Camera sensor '{name}': intrinsics.height must be "
+                        f"positive, got {ci.height}."
+                    )
 
 
 # ---------------------------------------------------------------------------

@@ -77,7 +77,9 @@ showing `GpsFuser` being used with `NmeaParser` and `ImuEkf`.
 
 ## 2. API Design
 
-### 2.1 Scan Context parameters must be specified twice (easy to mismatch)
+### 2.1 Scan Context parameters must be specified twice (easy to mismatch) ✓
+
+**Status:** Implemented — `ScanContextDatabase.compute_descriptor(cloud)` added.
 
 **Problem:** `compute_scan_context()` is a standalone function that takes
 `num_rings`, `num_sectors`, and `max_range` directly, while `ScanContextDatabase` is
@@ -99,7 +101,9 @@ that uses the stored parameters, so the caller never has to repeat them.
 
 ---
 
-### 2.2 `FramePoseSequence` has no convenience trajectory array accessors
+### 2.2 `FramePoseSequence` has no convenience trajectory array accessors ✓
+
+**Status:** Implemented — `positions`, `quaternions` properties and `to_csv()`/`from_csv()` added.
 
 **Problem:** Users frequently need the trajectory as numpy arrays (e.g., for
 visualisation, analysis, or exporting to CSV) but must write verbose boilerplate:
@@ -118,7 +122,9 @@ for easy analysis with pandas or numpy.
 
 ---
 
-### 2.3 `BagWriter` does not accept numpy arrays directly
+### 2.3 `BagWriter` does not accept numpy arrays directly ✓
+
+**Status:** Implemented — `_to_json_serializable()` helper added; numpy arrays are auto-converted.
 
 **Problem:** The bag payload is stored as JSON.  NumPy arrays must be manually
 converted with `.tolist()` before calling `bag.write()`.  Forgetting this raises a
@@ -138,7 +144,9 @@ the behaviour of `json.JSONEncoder` subclasses that handle numpy.
 
 ---
 
-### 2.4 `SensorCollection` silently accepts invalid sensor YAML
+### 2.4 `SensorCollection` silently accepts invalid sensor YAML ✓
+
+**Status:** Implemented — `SensorCollection.validate()` added and called from `from_yaml()`.
 
 **Problem:** `SensorCollection.from_yaml()` uses `data.get(key, default)` everywhere,
 so malformed YAML (wrong key names, missing required fields, wrong value types) is
@@ -151,7 +159,9 @@ complete `intrinsics` block with positive `fx`, `fy`, valid `width`/`height`, et
 
 ---
 
-### 2.5 No progress reporting in long-running iterative algorithms
+### 2.5 No progress reporting in long-running iterative algorithms ✓
+
+**Status:** Implemented — optional `callback(iteration, cost)` parameter added to `icp_align`, `optimize_pose_graph`, and `SlidingWindowSmoother.optimize`.
 
 **Problem:** ICP (`icp_align`), pose graph optimization (`optimize_pose_graph`), and
 the sliding window smoother (`SlidingWindowSmoother.optimize`) give no feedback
@@ -166,7 +176,9 @@ useful for debugging without adding a logging dependency.
 
 ---
 
-### 2.6 `SensorSynchroniser` provides no overlap diagnostics
+### 2.6 `SensorSynchroniser` provides no overlap diagnostics ✓
+
+**Status:** Implemented — `temporal_overlap()`, `stream_start_time()`, and `stream_end_time()` added.
 
 **Problem:** A common mistake is to register streams whose time ranges don't overlap,
 resulting in all interpolated values being boundary-clamped.  There is no method to
@@ -178,7 +190,9 @@ check whether registered streams have sufficient temporal overlap before calling
 
 ---
 
-### 2.7 British vs. American spelling inconsistency in the public API
+### 2.7 British vs. American spelling inconsistency in the public API ✓
+
+**Status:** Implemented — `color_by_height` alias for `colour_by_height` added in `visualisation.py`; `synchronize` method alias and `SensorSynchronizer` class alias added in `sync.py`.
 
 **Problem:** The library mixes British and American spelling across the public API:
 
@@ -195,7 +209,9 @@ spelling to avoid a breaking change.
 
 ---
 
-### 2.8 `SensorFrameVisualiser` has no factory for batch data
+### 2.8 `SensorFrameVisualiser` has no factory for batch data ✓
+
+**Status:** Implemented — `SensorFrameVisualiser.from_dict(data)` class method added.
 
 **Problem:** `SensorFrameVisualiser` must be populated field-by-field with separate
 `set_*` calls.  There is no constructor or class method that accepts a `BagMessage`
@@ -363,18 +379,18 @@ recommended extension ("sensor bag") and what it stands for.
 - [ ] Add an end-to-end `examples/slam_pipeline.py` quick-start script
 - [ ] Export `calibration.py` functions in `__init__.py` and README
 - [ ] Add `GpsFuser` documentation to the README GPS section
-- [ ] Give `ScanContextDatabase` a `compute_descriptor(cloud)` method to avoid
+- [x] Give `ScanContextDatabase` a `compute_descriptor(cloud)` method to avoid
       duplicated parameters
-- [ ] Add `BagWriter` numpy-array auto-conversion to prevent cryptic `TypeError`
-- [ ] Add `FramePoseSequence.positions` / `.quaternions` array properties
+- [x] Add `BagWriter` numpy-array auto-conversion to prevent cryptic `TypeError`
+- [x] Add `FramePoseSequence.positions` / `.quaternions` array properties and `to_csv()` / `from_csv()` methods
 
 ### Medium Impact
-- [ ] Add `SensorCollection.validate()` and call it from `from_yaml()`
-- [ ] Add optional `callback` parameter to `icp_align`, `optimize_pose_graph`, and
+- [x] Add `SensorCollection.validate()` and call it from `from_yaml()`
+- [x] Add optional `callback` parameter to `icp_align`, `optimize_pose_graph`, and
       `SlidingWindowSmoother.optimize`
-- [ ] Add `SensorSynchroniser.temporal_overlap()` diagnostics
-- [ ] Standardise British/American spelling (add aliases, pick one canonical form)
-- [ ] Add `SensorFrameVisualiser.from_dict()` factory method
+- [x] Add `SensorSynchroniser.temporal_overlap()` diagnostics
+- [x] Standardise British/American spelling (add aliases, pick one canonical form)
+- [x] Add `SensorFrameVisualiser.from_dict()` factory method
 - [ ] Add optional `open3d` and `rerun` extras to `pyproject.toml`
 - [ ] Document `.sbag` extension in README and `rosbag.py`
 

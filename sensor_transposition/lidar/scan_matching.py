@@ -33,6 +33,7 @@ Example::
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable, Optional
 
 import numpy as np
 from scipy.spatial import cKDTree  # type: ignore[import-untyped]
@@ -77,6 +78,7 @@ def icp_align(
     tolerance: float = 1e-6,
     max_correspondence_dist: float = float("inf"),
     initial_transform: np.ndarray | None = None,
+    callback: Optional[Callable[[int, float], None]] = None,
 ) -> IcpResult:
     """Align *source* to *target* using point-to-point ICP.
 
@@ -96,6 +98,14 @@ def icp_align(
             ``inf`` (accept all correspondences).
         initial_transform: Optional 4×4 homogeneous matrix applied to
             *source* before the first iteration.  Defaults to the identity.
+        callback: Optional callable invoked at the end of every iteration
+            with ``(iteration: int, mean_squared_error: float)``.  Can be
+            used to monitor progress or implement early stopping::
+
+                result = icp_align(
+                    src, tgt,
+                    callback=lambda i, c: print(f"iter {i}: mse={c:.6f}"),
+                )
 
     Returns:
         :class:`IcpResult` with the cumulative 4×4 transform, convergence
@@ -159,6 +169,8 @@ def icp_align(
 
         # Step 6 – check convergence.
         mse = float(np.mean(dists[mask] ** 2))
+        if callback is not None:
+            callback(iteration, mse)
         if abs(prev_mse - mse) < tolerance:
             converged = True
             break

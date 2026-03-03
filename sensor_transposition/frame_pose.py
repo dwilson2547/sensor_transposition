@@ -24,6 +24,7 @@ the trajectory of the sensor collection – a building block for SLAM
 
 from __future__ import annotations
 
+import csv
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -147,6 +148,16 @@ class FramePoseSequence:
         """1-D array of timestamps for every pose in the sequence."""
         return np.array([p.timestamp for p in self._poses], dtype=float)
 
+    @property
+    def positions(self) -> np.ndarray:
+        """``(N, 3)`` float array of ``[x, y, z]`` translations for every pose."""
+        return np.array([p.translation for p in self._poses], dtype=float)
+
+    @property
+    def quaternions(self) -> np.ndarray:
+        """``(N, 4)`` float array of ``[w, x, y, z]`` quaternions for every pose."""
+        return np.array([p.rotation for p in self._poses], dtype=float)
+
     # ------------------------------------------------------------------
     # Sequence management
     # ------------------------------------------------------------------
@@ -203,3 +214,58 @@ class FramePoseSequence:
         """Load a :class:`FramePoseSequence` from a YAML file."""
         raw = yaml.safe_load(Path(path).read_text())
         return cls.from_dict(raw)
+
+    def to_csv(self, path: str | os.PathLike) -> None:
+        """Write the pose sequence to a CSV file.
+
+        Each row encodes one :class:`FramePose` with columns:
+
+        ``timestamp, x, y, z, qw, qx, qy, qz``
+
+        The ``frame_duration`` is stored in the first comment line so
+        it can be recovered by :meth:`from_csv`.
+
+        Args:
+            path: Destination file path (will be created or overwritten).
+        """
+        with open(Path(path), "w", newline="") as f:
+            f.write(f"# frame_duration={self._frame_duration}\n")
+            writer = csv.writer(f)
+            writer.writerow(["timestamp", "x", "y", "z", "qw", "qx", "qy", "qz"])
+            for p in self._poses:
+                t = p.translation
+                r = p.rotation
+                writer.writerow([p.timestamp, t[0], t[1], t[2], r[0], r[1], r[2], r[3]])
+
+    @classmethod
+    def from_csv(cls, path: str | os.PathLike) -> "FramePoseSequence":
+        """Load a :class:`FramePoseSequence` from a CSV file written by :meth:`to_csv`.
+
+        Args:
+            path: Path to the CSV file.
+
+        Returns:
+            :class:`FramePoseSequence` reconstructed from the file.
+        """
+        frame_duration = 0.1
+        poses: List[FramePose] = []
+        with open(Path(path), "r", newline="") as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if not row:
+                    continue
+                first = row[0].strip()
+                if first.startswith("# frame_duration="):
+                    try:
+                        frame_duration = float(first.split("=", 1)[1])
+                    except ValueError:
+                        pass
+                    continue
+                if first == "timestamp":
+                    continue  # header row
+                poses.append(FramePose(
+                    timestamp=float(row[0]),
+                    translation=[float(row[1]), float(row[2]), float(row[3])],
+                    rotation=[float(row[4]), float(row[5]), float(row[6]), float(row[7])],
+                ))
+        return cls(frame_duration=frame_duration, poses=poses)
