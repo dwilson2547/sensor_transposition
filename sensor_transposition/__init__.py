@@ -15,6 +15,7 @@ from sensor_transposition.sync import (
 )
 from sensor_transposition import camera_intrinsics
 from sensor_transposition import calibration
+from sensor_transposition.calibration import fit_plane, ransac_plane, calibrate_lidar_camera
 from sensor_transposition import lidar
 from sensor_transposition import lidar_camera
 from sensor_transposition import gps
@@ -48,6 +49,9 @@ __all__ = [
     "find_nearest_indices",
     "interpolate_timestamps",
     "calibration",
+    "fit_plane",
+    "ransac_plane",
+    "calibrate_lidar_camera",
     "camera_intrinsics",
     "lidar",
     "lidar_camera",
