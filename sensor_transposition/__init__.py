@@ -34,6 +34,8 @@ from sensor_transposition import sliding_window
 from sensor_transposition import occupancy_grid
 from sensor_transposition import voxel_map
 from sensor_transposition import submap_manager
+from sensor_transposition import slam_session
+from sensor_transposition.slam_session import SLAMSession
 
 __all__ = [
     "SensorCollection",
@@ -72,4 +74,6 @@ __all__ = [
     "occupancy_grid",
     "voxel_map",
     "submap_manager",
+    "slam_session",
+    "SLAMSession",
 ]
