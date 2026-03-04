@@ -289,50 +289,34 @@ non-converged results.
 
 ### 5.1 `FramePose.transform` is a property but not cached
 
-**Problem:** `FramePose.transform` calls `_make_transform()` on every access.  In a
-tight loop (e.g., iterating over a 10 000-frame trajectory) this creates a new 4×4
-array each time.
-
-**Suggested fix:** Cache the result with `functools.cached_property` or by storing
-the matrix on first access.
+**Status:** Implemented — `transform` is now a `functools.cached_property`; the
+4×4 matrix is computed once and reused on subsequent accesses.
 
 ---
 
 ### 5.2 `lidar/motion_distortion.py` deskew timestamps require the user to know the sweep duration
 
-**Problem:** `deskew_scan()` requires a `ref_timestamp` that is meant to be either
-the start or end of the LiDAR sweep, but the docstring does not explain how to choose
-this relative to the per-point timestamps provided.  Users can silently deskew in the
-wrong direction.
-
-**Suggested fix:** Clarify in the docstring whether `ref_timestamp` should be the
-start, end, or midpoint of the sweep, and add an explicit note that point timestamps
-must be in the same reference clock as `ref_timestamp` (after applying
-`apply_time_offset` from `sync.py`).
+**Status:** Implemented — the `ref_time` parameter docstring now explains the
+choice between start / end / midpoint of the sweep and includes an explicit note
+that all timestamps must share the same hardware clock.
 
 ---
 
 ### 5.3 `occupancy_grid.py` ROS `int8` export is not explained in the README
 
-**Problem:** `OccupancyGrid.to_ros_int8()` returns a 2-D int8 array using the ROS
-convention (−1 unknown, 0 free, 100 occupied), which is the format needed by
-`nav_msgs/OccupancyGrid`.  This is not mentioned in the README; users working with
-ROS may not realise this compatibility exists.
-
-**Suggested fix:** Add a note in the README occupancy grid snippet showing how
-`to_ros_int8()` maps to the ROS message field.
+**Status:** Implemented — `OccupancyGrid.to_ros_int8()` method added (explicit
+alias for `get_grid()`).  The README occupancy grid snippet now shows the
+value-to-ROS-convention mapping and the `.ravel()` step for populating a
+`nav_msgs/OccupancyGrid` message.
 
 ---
 
 ### 5.4 No `__repr__` on key dataclasses
 
-**Problem:** `FramePose`, `BagMessage`, `IcpResult`, `OdometryResult`, and similar
-dataclasses use the auto-generated `@dataclass` repr, which prints the full
-covariance matrix (6×6) or entire numpy array inline, making interactive REPL use
-very noisy.
-
-**Suggested fix:** Add a `__repr__` to at least `FramePose` and `IcpResult` that
-shows compact summaries (e.g., `FramePose(t=1234.5, xyz=[1.0, 0.0, 0.0])`).
+**Status:** Implemented — compact `__repr__` added to `FramePose`
+(`FramePose(t=…, xyz=[…])`), `IcpResult`
+(`IcpResult(converged=…, mse=…, n_iter=…)`), and `OdometryResult`
+(`OdometryResult(x=…, y=…, theta=…, dur=…s)`).
 
 ---
 
@@ -370,10 +354,10 @@ recommended extension ("sensor bag") and what it stands for.
 - [x] Document `.sbag` extension in README and `rosbag.py`
 
 ### Low Impact
-- [ ] Cache `FramePose.transform` with `functools.cached_property`
-- [ ] Clarify `deskew_scan` `ref_timestamp` convention in docstring
-- [ ] Add ROS `int8` export note to README occupancy grid section
-- [ ] Add compact `__repr__` to `FramePose`, `IcpResult`, and `OdometryResult`
+- [x] Cache `FramePose.transform` with `functools.cached_property`
+- [x] Clarify `deskew_scan` `ref_timestamp` convention in docstring
+- [x] Add ROS `int8` export note to README occupancy grid section
+- [x] Add compact `__repr__` to `FramePose`, `IcpResult`, and `OdometryResult`
 - [x] Add `sbag_to_rosbag` conversion helper (or MCAP writer option)
 - [x] Add `Pipeline` / `SLAMSession` orchestration class or reference example
 - [x] Define a small library-specific exception hierarchy

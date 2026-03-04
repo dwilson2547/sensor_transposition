@@ -64,6 +64,13 @@ class IcpResult:
     num_iterations: int
     mean_squared_error: float
 
+    def __repr__(self) -> str:
+        return (
+            f"IcpResult(converged={self.converged}, "
+            f"mse={self.mean_squared_error:.6g}, "
+            f"n_iter={self.num_iterations})"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Public API

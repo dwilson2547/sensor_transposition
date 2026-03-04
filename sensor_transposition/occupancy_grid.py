@@ -355,6 +355,29 @@ class OccupancyGrid:
         y = self._origin[1] + (row + 0.5) * self._resolution
         return float(x), float(y)
 
+    def to_ros_int8(self) -> np.ndarray:
+        """Return the occupancy grid as a 2-D ``int8`` array in ROS convention.
+
+        This is a convenience alias for :meth:`get_grid` that makes the
+        ``nav_msgs/OccupancyGrid`` compatibility explicit.  The returned array
+        can be assigned directly to the ``data`` field of a ROS
+        ``nav_msgs/OccupancyGrid`` message after flattening (``grid.ravel()``).
+
+        Values follow the ROS convention:
+
+        * ``-1``  – unknown / not yet observed
+        * ``0``   – free
+        * ``100`` – occupied
+
+        Returns:
+            ``(height, width)`` ``int8`` array.
+
+        Example::
+
+            ros_msg_data = grid.to_ros_int8().ravel()
+        """
+        return self.get_grid()
+
     def clear(self) -> None:
         """Reset all cells to the unknown state (log-odds = 0)."""
         self._log_odds[:] = _LOG_ODDS_UNKNOWN

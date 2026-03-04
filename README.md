@@ -920,9 +920,14 @@ occupancy = grid.get_grid()       # (height, width) int8 — ROS convention
 probs     = grid.to_probability() # (height, width) float64 in [0, 1]
 
 # ROS nav_msgs/OccupancyGrid compatibility:
-# grid.to_ros_int8() returns a 2-D int8 array using the ROS convention:
-#   -1 = unknown,  0 = free,  100 = occupied
-ros_grid = grid.to_ros_int8()
+# to_ros_int8() is an explicit alias for get_grid() that maps cell states to
+# the ROS nav_msgs/OccupancyGrid data convention:
+#   -1  →  unknown (cell not yet observed)
+#    0  →  free
+#  100  →  occupied
+# Flatten with .ravel() to assign to the message's `data` field:
+ros_grid = grid.to_ros_int8()        # (height, width) int8
+ros_msg_data = ros_grid.ravel()      # flat int8 array for nav_msgs/OccupancyGrid.data
 ```
 
 ---

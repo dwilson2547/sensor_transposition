@@ -219,9 +219,26 @@ def deskew_scan(
             m/s² (body frame).
         imu_gyro: ``(K, 3)`` float array of gyroscope measurements in rad/s
             (body frame).
-        ref_time: Reference timestamp (seconds) to deskew all points to.
-            Typically the start (``point_times.min()``) or end
-            (``point_times.max()``) of the scan.
+        ref_time: Reference timestamp (seconds) to which all points are
+            deskewed.  Choose this as either the **start**
+            (``point_times.min()``) or the **end** (``point_times.max()``)
+            of the LiDAR sweep:
+
+            * **Start** – the deskewed cloud is expressed in the sensor frame
+              at the beginning of the sweep.  This is typical for
+              LOAM-style front-end pipelines.
+            * **End** – the deskewed cloud is expressed in the sensor frame at
+              the end of the sweep.  Some systems prefer this because the last
+              IMU sample falls closest to the next processing step.
+
+            Using the **midpoint** (``(min + max) / 2``) is also valid and
+            minimises the maximum per-point correction magnitude.
+
+            .. important::
+                ``ref_time`` and all values in ``point_times`` must be in the
+                **same hardware clock** as ``imu_times``.  If the clocks
+                differ, apply :func:`~sensor_transposition.sync.apply_time_offset`
+                to align them before calling this function.
         accel_bias: Optional ``(3,)`` accelerometer bias in m/s².  Defaults to
             ``[0, 0, 0]`` (no correction).
         gyro_bias: Optional ``(3,)`` gyroscope bias in rad/s.  Defaults to

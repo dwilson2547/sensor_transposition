@@ -25,6 +25,7 @@ the trajectory of the sensor collection – a building block for SLAM
 from __future__ import annotations
 
 import csv
+import functools
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -69,10 +70,18 @@ class FramePose:
     rotation: List[float] = field(default_factory=lambda: [1.0, 0.0, 0.0, 0.0])
     covariance: Optional[np.ndarray] = field(default=None)
 
-    @property
+    @functools.cached_property
     def transform(self) -> np.ndarray:
-        """4×4 homogeneous transform: ego frame → world/map frame."""
+        """4×4 homogeneous transform: ego frame → world/map frame.
+
+        The result is computed once and cached on first access.
+        """
         return _make_transform(self.rotation, self.translation)
+
+    def __repr__(self) -> str:
+        xyz = [round(float(v), 4) for v in self.translation]
+        q = [round(float(v), 4) for v in self.rotation]
+        return f"FramePose(t={self.timestamp}, xyz={xyz}, q={q})"
 
     def to_dict(self) -> dict:
         d = {
