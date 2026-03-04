@@ -83,6 +83,20 @@ Integration with sensor_transposition
     with BagReader("session.sbag") as bag:
         for msg in bag.read_messages(topics=["/pose/ego"]):
             poses.append(FramePose.from_dict(msg.data))
+
+Converting to MCAP (ROS 2 compatible)
+--------------------------------------
+Use :func:`sbag_to_rosbag` to convert a ``.sbag`` file to MCAP format, which
+can be opened with ``ros2 bag`` (ROS 2 Humble and later) or any MCAP-aware
+tool::
+
+    from sensor_transposition.rosbag import sbag_to_rosbag
+
+    sbag_to_rosbag("session.sbag", "session.mcap")
+
+Requires the ``mcap`` package::
+
+    pip install "sensor_transposition[mcap]"
 """
 
 from __future__ import annotations
@@ -536,3 +550,77 @@ class BagReader:
         data = json.loads(payload_bytes.decode("utf-8"))
 
         return BagMessage(topic=topic, timestamp=timestamp, data=data)
+
+
+# ---------------------------------------------------------------------------
+# sbag_to_rosbag — MCAP conversion helper
+# ---------------------------------------------------------------------------
+
+
+def sbag_to_rosbag(
+    sbag_path: Union[str, os.PathLike],
+    output_path: Union[str, os.PathLike],
+) -> None:
+    """Convert a ``.sbag`` file to MCAP format for use with ROS 2 bag tools.
+
+    Each ``.sbag`` message is written as a JSON-encoded MCAP message on the
+    same topic with a single shared ``json`` schema.  The resulting MCAP file
+    can be opened with ``ros2 bag``, `mcap CLI <https://github.com/foxglove/mcap>`_,
+    or Foxglove Studio.
+
+    Args:
+        sbag_path: Path to the source ``.sbag`` file.
+        output_path: Destination path for the output MCAP file (conventionally
+            ``.mcap``).
+
+    Raises:
+        ImportError: If the ``mcap`` package is not installed.  Install it
+            with ``pip install "sensor_transposition[mcap]"``.
+        FileNotFoundError: If *sbag_path* does not exist.
+
+    Example::
+
+        from sensor_transposition.rosbag import sbag_to_rosbag
+
+        sbag_to_rosbag("session.sbag", "session.mcap")
+        # Open with: ros2 bag info session.mcap
+    """
+    try:
+        from mcap.writer import Writer as _McapWriter  # type: ignore[import]
+    except ImportError as exc:
+        raise ImportError(
+            "The 'mcap' package is required for sbag_to_rosbag.\n"
+            "Install it with:\n\n    pip install \"sensor_transposition[mcap]\""
+        ) from exc
+
+    sbag_path = Path(sbag_path)
+    output_path = Path(output_path)
+
+    with BagReader(sbag_path) as reader, open(output_path, "wb") as f:
+        writer = _McapWriter(f)
+        writer.start()
+        # One shared JSON schema for all topics.
+        schema_id = writer.register_schema(
+            name="json",
+            encoding="jsonschema",
+            data=b"{}",
+        )
+        channel_ids: Dict[str, int] = {}
+        for msg in reader.read_messages():
+            if msg.topic not in channel_ids:
+                channel_ids[msg.topic] = writer.register_channel(
+                    topic=msg.topic,
+                    message_encoding="json",
+                    schema_id=schema_id,
+                    metadata={},
+                )
+            payload = json.dumps(msg.data, separators=(",", ":")).encode("utf-8")
+            log_time_ns = int(msg.timestamp * 1_000_000_000)
+            writer.add_message(
+                channel_id=channel_ids[msg.topic],
+                log_time=log_time_ns,
+                data=payload,
+                publish_time=log_time_ns,
+                sequence=0,
+            )
+        writer.finish()

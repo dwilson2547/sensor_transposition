@@ -229,50 +229,19 @@ visualiser in one step.
 
 ### 3.1 Custom bag format (`.sbag`) has no bridge to standard ROS bag tools
 
-**Problem:** The `rosbag.py` module writes a custom binary format that cannot be
-opened with `rosbag` (ROS 1), `ros2 bag`, or any standard bag inspection tool.  Teams
-who use ROS end-to-end would need to write a converter themselves.
-
-**Suggested fix:** Provide a conversion script or helper function
-`sbag_to_rosbag(sbag_path, rosbag_path)` (using the `rosbags` pure-Python library or
-the `mcap` SDK, both dependency-free for the serialisation layer) and document how to
-use it.  Alternatively, add an MCAP writer option alongside the existing custom format.
+**Status:** Implemented — `sbag_to_rosbag(sbag_path, output_path)` added to `rosbag.py`; writes MCAP format (JSON-encoded messages) compatible with `ros2 bag` and Foxglove Studio.  Requires `pip install "sensor_transposition[mcap]"`.  Documented in `rosbag.py` module docstring and the README Bag Recorder section.
 
 ---
 
 ### 3.2 No standard way to wire modules together for a complete pipeline
 
-**Problem:** The fifteen modules are well-designed individually but there is no
-higher-level orchestration layer.  A new user reading the README must mentally compose:
-NmeaParser → GpsFuser → ImuEkf → IcpAlign → ScanContextDatabase → PoseGraph →
-PointCloudMap → visualisation.  This is a significant barrier.
-
-**Suggested fix:** Consider a thin `Pipeline` or `SLAMSession` class that:
-- Accepts a `SensorCollection` and a `BagReader`.
-- Exposes step-by-step callbacks (`on_lidar_frame`, `on_imu_sample`, etc.).
-- Manages the EKF state, pose graph, point cloud map, and loop closure database
-  internally.
-- Provides sensible defaults that users can override.
-
-Even a lightweight reference implementation in `examples/` would help users see how
-everything fits together.
+**Status:** Implemented — `SLAMSession` class added in `sensor_transposition/slam_session.py`.  It accepts a `BagReader`, exposes per-topic callbacks via `on_topic()`, manages the loop-closure database, pose graph, trajectory, and point-cloud map internally, and exposes them as properties for advanced use.  Exported from `sensor_transposition.__init__` and documented in the README.  `examples/slam_pipeline.py` also serves as a lower-level reference.
 
 ---
 
 ### 3.3 No optional-dependency declarations for external integrations
 
-**Problem:** The `visualisation.py` module documents exporting to Open3D and RViz,
-and the README mentions `rerun.io`, but the `pyproject.toml` declares no optional
-extras.  Users who try to follow the export examples will hit `ImportError` at runtime
-with no guidance.
-
-**Suggested fix:** Add optional extras to `pyproject.toml`:
-```toml
-[project.optional-dependencies]
-open3d = ["open3d>=0.17"]
-rerun  = ["rerun-sdk>=0.14"]
-```
-and document them in the README `Installation` section.
+**Status:** Implemented — `open3d = ["open3d>=0.17"]`, `rerun = ["rerun-sdk>=0.14"]`, and `mcap = ["mcap>=1.0"]` optional extras added to `pyproject.toml`.  The README Installation section now documents all three extras with a summary table.
 
 ---
 
@@ -391,8 +360,8 @@ recommended extension ("sensor bag") and what it stands for.
 - [x] Add `SensorSynchroniser.temporal_overlap()` diagnostics
 - [x] Standardise British/American spelling (add aliases, pick one canonical form)
 - [x] Add `SensorFrameVisualiser.from_dict()` factory method
-- [ ] Add optional `open3d` and `rerun` extras to `pyproject.toml`
-- [ ] Document `.sbag` extension in README and `rosbag.py`
+- [x] Add optional `open3d` and `rerun` extras to `pyproject.toml`
+- [x] Document `.sbag` extension in README and `rosbag.py`
 
 ### Low Impact
 - [ ] Define a small library-specific exception hierarchy
@@ -401,5 +370,5 @@ recommended extension ("sensor bag") and what it stands for.
 - [ ] Clarify `deskew_scan` `ref_timestamp` convention in docstring
 - [ ] Add ROS `int8` export note to README occupancy grid section
 - [ ] Add compact `__repr__` to `FramePose`, `IcpResult`, and `OdometryResult`
-- [ ] Add `sbag_to_rosbag` conversion helper (or MCAP writer option)
-- [ ] Add `Pipeline` / `SLAMSession` orchestration class or reference example
+- [x] Add `sbag_to_rosbag` conversion helper (or MCAP writer option)
+- [x] Add `Pipeline` / `SLAMSession` orchestration class or reference example

@@ -39,6 +39,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
   - [Visualisation](#visualisation)
   - [Bag Recorder / Player](#bag-recorder--player)
   - [Camera–LiDAR Extrinsic Calibration](#cameralidar-extrinsic-calibration)
+  - [SLAM Session (Pipeline Orchestration)](#slam-session-pipeline-orchestration)
 - [Configuration Example](#configuration-example)
 - [Quick-Start: End-to-End SLAM Pipeline](#quick-start-end-to-end-slam-pipeline)
 - [ROS Examples](#ros-examples)
@@ -72,7 +73,8 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
 - **Voxel map (TSDF)** – Truncated Signed-Distance Function volumetric map for dense 3-D reconstruction.
 - **Point-cloud map** – accumulated coloured point-cloud map with voxel-grid downsampling and PCD / PLY I/O.
 - **Visualisation** – BEV rendering, trajectory overlay, LiDAR-on-image overlay, Open3D and RViz export helpers.
-- **Bag recorder / player** – lightweight multi-topic binary bag format (`.sbag`) with streaming write and indexed playback; no external dependencies.
+- **Bag recorder / player** – lightweight multi-topic binary bag format (`.sbag`) with streaming write and indexed playback; no external dependencies.  `sbag_to_rosbag()` converts to MCAP for use with `ros2 bag` (requires `pip install ".[mcap]"`).
+- **SLAM session** – `SLAMSession` orchestration class that wires ICP odometry, Scan Context loop closure, pose-graph optimisation, and point-cloud map accumulation into a single object with sensible defaults and per-topic callbacks.
 - **Camera–LiDAR extrinsic calibration** – target-based extrinsic calibration using plane correspondences (`fit_plane`, `ransac_plane`, `calibrate_lidar_camera`).
 - **ROS examples** – ready-to-use launch / parameter files for Velodyne and Ouster LiDARs in both ROS 1 and ROS 2.
 
@@ -91,6 +93,22 @@ pip install ".[dev]"
 ```
 
 Requires Python ≥ 3.9 and `numpy`, `pyyaml`, and `scipy`.
+
+### Optional extras
+
+Install optional extras to unlock additional integrations:
+
+| Extra | Package installed | Enables |
+|-------|------------------|---------|
+| `open3d` | `open3d>=0.17` | `export_point_cloud_open3d()` and Open3D visualisation |
+| `rerun` | `rerun-sdk>=0.14` | rerun.io visualisation logging |
+| `mcap` | `mcap>=1.0` | `sbag_to_rosbag()` MCAP conversion |
+
+```bash
+pip install ".[open3d]"   # Open3D support
+pip install ".[rerun]"    # rerun.io support
+pip install ".[mcap]"     # MCAP / ROS 2 bag conversion
+```
 
 ---
 
@@ -1036,6 +1054,19 @@ UTF-8 JSON payload, so files can be inspected with any text editor after
 stripping the binary header.  See `docs/rosbag.md` for the full format
 specification.
 
+#### Converting to MCAP (ROS 2 compatible)
+
+Use `sbag_to_rosbag` to convert a `.sbag` file to
+[MCAP](https://mcap.dev/) format, which can be opened with `ros2 bag`,
+the MCAP CLI, or Foxglove Studio (requires `pip install ".[mcap]"`):
+
+```python
+from sensor_transposition.rosbag import sbag_to_rosbag
+
+sbag_to_rosbag("session.sbag", "session.mcap")
+# Inspect with: ros2 bag info session.mcap
+```
+
 ---
 
 ### Camera–LiDAR Extrinsic Calibration
@@ -1076,6 +1107,52 @@ T_lidar_to_cam = calibrate_lidar_camera(
 
 See [`docs/camera_lidar_extrinsic_calibration.md`](docs/camera_lidar_extrinsic_calibration.md)
 for a complete worked example including the camera-side PnP procedure.
+
+---
+
+### SLAM Session (Pipeline Orchestration)
+
+:class:`SLAMSession` wires together the core SLAM modules — ICP scan matching,
+Scan Context loop closure, pose-graph optimisation, and point-cloud map
+accumulation — into a single object with sensible defaults.
+
+```python
+from sensor_transposition.rosbag import BagReader
+from sensor_transposition.slam_session import SLAMSession
+
+# Run the pipeline
+with BagReader("session.sbag") as bag:
+    session = SLAMSession(
+        icp_max_iterations=50,
+        loop_closure_threshold=0.15,
+    )
+    session.run(bag, lidar_topic="/lidar/points")
+
+# Optimise pose graph and rebuild map with corrected poses
+session.optimize()
+
+# Save outputs
+session.point_cloud_map.voxel_downsample(voxel_size=0.10)
+session.point_cloud_map.save_pcd("map.pcd")
+session.trajectory.to_csv("trajectory.csv")
+```
+
+Register callbacks for other sensor topics:
+
+```python
+session = SLAMSession()
+
+@session.on_topic("/imu/data")
+def handle_imu(msg):
+    print(f"IMU @ {msg.timestamp:.3f}s: accel={msg.data['accel']}")
+
+with BagReader("session.sbag") as bag:
+    session.run(bag)
+```
+
+All internal components are accessible as properties for advanced use:
+`session.pose_graph`, `session.loop_db`, `session.trajectory`,
+`session.point_cloud_map`.
 
 ---
 

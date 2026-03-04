@@ -19,6 +19,9 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
 ]
+open3d = ["open3d>=0.17"]
+rerun = ["rerun-sdk>=0.14"]
+mcap = ["mcap>=1.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]
