@@ -88,6 +88,13 @@ class OdometryResult:
     duration: float
     num_samples: int
 
+    def __repr__(self) -> str:
+        return (
+            f"OdometryResult(x={self.x:.4g}, y={self.y:.4g}, "
+            f"theta={self.theta:.4g}, dur={self.duration:.4g}s, "
+            f"n={self.num_samples})"
+        )
+
     @property
     def translation(self) -> np.ndarray:
         """``[x, y, 0]`` displacement vector (metres)."""
