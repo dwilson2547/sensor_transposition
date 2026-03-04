@@ -11,6 +11,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
 - [Coordinate Systems](#coordinate-systems)
 - [Modules](#modules)
   - [SensorCollection](#sensorcollection)
+  - [Sensor Synchroniser](#sensor-synchroniser)
   - [Camera Intrinsics](#camera-intrinsics)
   - [Fisheye / Omnidirectional Camera](#fisheye--omnidirectional-camera)
   - [Transform](#transform)
@@ -128,6 +129,17 @@ col.to_yaml("my_rig.yaml")
 **YAML sensor types:** `camera`, `lidar`, `radar`, `gps`, `imu`.  
 Each entry specifies `coordinate_system`, `extrinsics` (translation + quaternion + optional `time_offset_sec`), and optional type-specific parameter blocks.
 
+**`from_yaml()` validation** – when loading from YAML, `SensorCollection.validate()` is automatically called to catch common mistakes (e.g. a `camera` sensor missing its `intrinsics` block, or non-positive `fx`/`fy`/`width`/`height` values) before they cause cryptic errors downstream:
+
+```python
+# Raises ValueError immediately with a clear message:
+# "Camera sensor 'front_camera' is missing a required 'intrinsics' block."
+col = SensorCollection.from_yaml("bad_config.yaml")
+
+# You can also call validate() explicitly on a programmatically-built collection:
+col.validate()
+```
+
 **Temporal extrinsic calibration** – each sensor can declare a `time_offset_sec` in its `extrinsics` block that captures the delay between the sensor's hardware clock and the reference/ego clock.  Use `SensorCollection.time_offset_between(source, target)` to compute the time difference between any two sensors:
 
 ```python
@@ -137,6 +149,44 @@ dt = col.time_offset_between("front_lidar", "front_camera")   # e.g. +0.033
 # Synchronise a LiDAR timestamp to the camera's timebase
 t_camera_equiv = t_lidar + dt
 ```
+
+---
+
+### Sensor Synchroniser
+
+Resample multiple sensor streams onto a common reference timeline.
+
+```python
+from sensor_transposition.sync import (
+    SensorSynchroniser,
+    SensorSynchronizer,   # American-spelling alias
+)
+import numpy as np
+
+sync = SensorSynchroniser()
+sync.add_stream("lidar", lidar_times, lidar_data,
+                time_offset_sec=col.get_sensor("front_lidar").time_offset_sec)
+sync.add_stream("imu",   imu_times,   imu_accel,
+                time_offset_sec=col.get_sensor("imu").time_offset_sec)
+
+# Check that the streams actually overlap before resampling:
+overlap = sync.temporal_overlap()
+if overlap is None:
+    raise RuntimeError("Streams do not overlap — check time offsets.")
+t_start, t_end = overlap
+
+# Resample all streams at LiDAR reference times (synchronise / synchronize both work):
+aligned = sync.synchronise(lidar_times)
+imu_at_lidar_times = aligned["imu"]
+```
+
+| Method | Description |
+|--------|-------------|
+| `add_stream(name, times, data)` | Register a named sensor stream |
+| `temporal_overlap()` | Return `(start, end)` of the common overlap, or `None` |
+| `stream_start_time(name)` / `stream_end_time(name)` | Per-stream time bounds |
+| `synchronise(ref_times)` / `synchronize(ref_times)` | Resample all streams |
+| `interpolate(name, query_times)` | Resample a single stream |
 
 ---
 
@@ -355,6 +405,15 @@ aligned = (R @ source_xyz.T).T + t
 | `tolerance` | `1e-6` | Convergence threshold on MSE change per iteration |
 | `max_correspondence_dist` | `inf` | Reject source–target pairs farther apart than this (metres) |
 | `initial_transform` | `None` | Optional 4×4 initial guess applied before the first iteration |
+| `callback` | `None` | Optional callable `(iteration, mse)` for progress monitoring |
+
+```python
+# Monitor ICP progress with a callback:
+result = icp_align(
+    source_xyz, target_xyz,
+    callback=lambda i, mse: print(f"iter {i}: mse={mse:.6f}"),
+)
+```
 
 The returned `IcpResult` contains:
 - `transform` – 4×4 homogeneous matrix mapping source → target frame
@@ -515,6 +574,18 @@ for fix in fixes:
 `hdop_to_noise(hdop)` converts the HDOP field from a GGA sentence into a 3×3
 diagonal ENU position noise covariance matrix, ready to pass to
 `ImuEkf.position_update`.
+
+**`FramePoseSequence` convenience accessors:**
+
+```python
+# Get trajectory as numpy arrays for analysis or export:
+positions   = seq.positions    # (N, 3) float64 array of [x, y, z]
+quaternions = seq.quaternions  # (N, 4) float64 array of [w, x, y, z]
+
+# Export to / load from CSV (timestamp, x, y, z, qw, qx, qy, qz):
+seq.to_csv("trajectory.csv")
+seq2 = FramePoseSequence.from_csv("trajectory.csv")
+```
 
 ---
 
@@ -693,16 +764,15 @@ Place recognition using Scan Context and M2DP descriptors.
 
 ```python
 from sensor_transposition.loop_closure import (
-    compute_scan_context,
-    compute_m2dp,
     ScanContextDatabase,
+    compute_m2dp,
 )
 
 db = ScanContextDatabase(num_rings=20, num_sectors=60, max_range=80.0)
 
 for frame_id, cloud in enumerate(lidar_frames):
-    desc = compute_scan_context(cloud, num_rings=20, num_sectors=60,
-                                max_range=80.0)
+    # compute_descriptor() uses the database's own parameters — no duplication:
+    desc = db.compute_descriptor(cloud)
     candidates = db.query(desc, top_k=1)
     db.add(desc, frame_id=frame_id)
 
@@ -750,6 +820,12 @@ opt = optimize_pose_graph(graph)
 if opt.success:
     for node_id, pose in opt.optimized_poses.items():
         print(node_id, pose["translation"])
+
+# Optional progress callback (iteration number + current cost):
+opt = optimize_pose_graph(
+    graph,
+    callback=lambda i, c: print(f"iter {i}: cost={c:.4f}"),
+)
 ```
 
 ---
@@ -773,6 +849,9 @@ for i, (trans, rel_tf) in enumerate(keyframe_stream):
     result = smoother.optimize()
     if result.success:
         print(f"Node {i}: {result.optimized_poses[i]['translation']}")
+
+# Progress callback is supported:
+result = smoother.optimize(callback=lambda i, c: print(f"iter {i}: cost={c:.4f}"))
 ```
 
 ---
@@ -892,11 +971,17 @@ from sensor_transposition.visualisation import (
     render_trajectory_birdseye,
     overlay_lidar_on_image,
     export_point_cloud_open3d,
+    colour_by_height,
+    color_by_height,      # American-spelling alias
     SensorFrameVisualiser,
 )
 
 # Bird's-eye view of the accumulated map
 bev = render_birdseye_view(map_points, resolution=0.10)
+
+# Colour a point cloud by height (both spellings accepted)
+colours = colour_by_height(points[:, 2])   # (N, 3) uint8
+colours = color_by_height(points[:, 2])    # identical result
 
 # Overlay depth-coded LiDAR on a camera image
 from sensor_transposition.lidar_camera import project_lidar_to_image
@@ -904,10 +989,19 @@ pixel_coords, valid = project_lidar_to_image(lidar_scan, T, K, W, H)
 depth   = lidar_scan[:, 0]
 overlay = overlay_lidar_on_image(camera_image, pixel_coords, valid, depth)
 
-# Per-frame container for combined rendering
+# Per-frame container — populate field-by-field:
 vis = SensorFrameVisualiser()
 vis.set_point_cloud(lidar_scan)
 vis.set_camera_image(camera_image)
+bev_frame = vis.render_birdseye(resolution=0.10)
+
+# Or construct from a bag message payload in one step:
+vis = SensorFrameVisualiser.from_dict({
+    "point_cloud": lidar_scan,
+    "camera_image": camera_image,
+    "trajectory": trajectory_xy,
+    "radar_scan": radar_points,
+})
 bev_frame = vis.render_birdseye(resolution=0.10)
 
 # Export for Open3D
@@ -923,18 +1017,18 @@ multi-sensor data.  No external dependencies — pure Python standard library.
 
 ```python
 from sensor_transposition.rosbag import BagWriter, BagReader
+import numpy as np
 
-# Record
+# Record — numpy arrays are automatically converted (no .tolist() needed):
 with BagWriter("session.sbag") as bag:
-    bag.write("/lidar/points", timestamp, {"xyz": lidar_pts.tolist()})
-    bag.write("/imu/data",     timestamp, {"accel": a.tolist(),
-                                           "gyro":  g.tolist()})
+    bag.write("/lidar/points", timestamp, {"xyz": lidar_pts})  # numpy OK
+    bag.write("/imu/data",     timestamp, {"accel": accel_arr, "gyro": gyro_arr})
 
 # Replay
 with BagReader("session.sbag") as bag:
     print("Topics:", bag.topics)
     for msg in bag.read_messages(topics=["/lidar/points"]):
-        xyz = msg.data["xyz"]
+        xyz = msg.data["xyz"]   # plain Python list after round-trip
 ```
 
 The `.sbag` extension stands for **sensor bag**.  Each message record stores a

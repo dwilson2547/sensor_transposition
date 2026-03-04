@@ -9,6 +9,7 @@ from sensor_transposition.transform import Transform
 from sensor_transposition.frame_pose import FramePose, FramePoseSequence
 from sensor_transposition.sync import (
     SensorSynchroniser,
+    SensorSynchronizer,
     apply_time_offset,
     find_nearest_indices,
     interpolate_timestamps,
@@ -45,6 +46,7 @@ __all__ = [
     "FramePose",
     "FramePoseSequence",
     "SensorSynchroniser",
+    "SensorSynchronizer",
     "apply_time_offset",
     "find_nearest_indices",
     "interpolate_timestamps",

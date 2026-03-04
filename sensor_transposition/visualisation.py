@@ -166,6 +166,10 @@ def _jet_colormap(t: np.ndarray) -> np.ndarray:
     return (np.clip(np.stack([r, g, b], axis=1), 0.0, 1.0) * 255.0).astype(np.uint8)
 
 
+# American-spelling alias for colour_by_height.
+color_by_height = colour_by_height
+
+
 # ---------------------------------------------------------------------------
 # Bird's-eye view rendering
 # ---------------------------------------------------------------------------
@@ -643,6 +647,55 @@ class SensorFrameVisualiser:
         self._image: Optional[np.ndarray] = None     # (H, W, 3) uint8
         self._trajectory: Optional[np.ndarray] = None  # (M, 2+) float
         self._radar: Optional[np.ndarray] = None     # (K, 2+) float
+
+    # ------------------------------------------------------------------
+    # Factory
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SensorFrameVisualiser":
+        """Create a :class:`SensorFrameVisualiser` from a frame snapshot dict.
+
+        Accepts a dictionary with any combination of the following optional
+        keys — the same shape as a ``BagMessage`` payload when replaying bag
+        files:
+
+        * ``"point_cloud"`` – ``(N, 3)`` array-like of XYZ coordinates.
+        * ``"point_colors"`` – optional ``(N, 3)`` array-like of RGB colours.
+        * ``"camera_image"`` – ``(H, W, 3)`` uint8 array-like.
+        * ``"trajectory"``   – ``(M, 2+)`` array-like of XY(Z) positions.
+        * ``"radar_scan"``   – ``(K, 2+)`` array-like of XY(Z) radar returns.
+
+        Keys that are absent or ``None`` are silently skipped.
+
+        Args:
+            data: Dictionary with optional sensor data keys (see above).
+
+        Returns:
+            A populated :class:`SensorFrameVisualiser` instance.
+
+        Example::
+
+            # Replay bag messages for visualisation:
+            with BagReader("session.sbag") as bag:
+                for msg in bag.read_messages():
+                    vis = SensorFrameVisualiser.from_dict(msg.data)
+                    bev = vis.render_birdseye(resolution=0.10)
+        """
+        vis = cls()
+        if data.get("point_cloud") is not None:
+            colors = data.get("point_colors")
+            vis.set_point_cloud(
+                np.asarray(data["point_cloud"], dtype=float),
+                colors=np.asarray(colors) if colors is not None else None,
+            )
+        if data.get("camera_image") is not None:
+            vis.set_camera_image(np.asarray(data["camera_image"]))
+        if data.get("trajectory") is not None:
+            vis.set_trajectory(np.asarray(data["trajectory"], dtype=float))
+        if data.get("radar_scan") is not None:
+            vis.set_radar_points(np.asarray(data["radar_scan"], dtype=float))
+        return vis
 
     # ------------------------------------------------------------------
     # Setters

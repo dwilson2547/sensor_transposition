@@ -120,6 +120,33 @@ _TIMESTAMP_SIZE = struct.calcsize(_TIMESTAMP_FMT)            # 8
 
 
 # ---------------------------------------------------------------------------
+# JSON serialisation helper
+# ---------------------------------------------------------------------------
+
+
+def _to_json_serializable(obj):
+    """Recursively convert numpy arrays and scalars to plain Python types.
+
+    This lets callers pass numpy arrays directly to :meth:`BagWriter.write`
+    without having to call ``.tolist()`` themselves.  Nested dicts and lists
+    are traversed so the conversion applies to any depth of the payload.
+    """
+    try:
+        import numpy as np  # optional; not in the module-level imports
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, np.generic):
+            return obj.item()
+    except ImportError:
+        pass
+    if isinstance(obj, dict):
+        return {k: _to_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_json_serializable(v) for v in obj]
+    return obj
+
+
+# ---------------------------------------------------------------------------
 # BagMessage
 # ---------------------------------------------------------------------------
 
@@ -202,11 +229,14 @@ class BagWriter:
             topic: Channel name (e.g. ``"/lidar/points"``).  Must be a
                 non-empty string.
             timestamp: Message timestamp in seconds (reference clock).
-            data: Payload dict.  Must be JSON-serialisable.
+            data: Payload dict.  Must be JSON-serialisable.  NumPy arrays
+                and scalars are automatically converted to Python lists /
+                floats so callers do not need to call ``.tolist()`` manually.
 
         Raises:
             ValueError: If *topic* is empty or *data* is not a ``dict``.
-            TypeError: If *data* contains non-JSON-serialisable values.
+            TypeError: If *data* contains non-JSON-serialisable values that
+                are not numpy arrays.
             RuntimeError: If the writer has already been closed.
         """
         if self._file is None or self._file.closed:
@@ -219,7 +249,7 @@ class BagWriter:
             )
 
         topic_bytes = topic.encode("utf-8")
-        payload_bytes = json.dumps(data, separators=(",", ":")).encode("utf-8")
+        payload_bytes = json.dumps(_to_json_serializable(data), separators=(",", ":")).encode("utf-8")
 
         # The uint32 record_size field counts bytes *after* itself.
         # Layout after the uint32: uint16 topic_len | topic | timestamp | payload

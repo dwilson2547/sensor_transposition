@@ -279,6 +279,68 @@ class SensorSynchroniser:
             )
         return self._streams[name][0]
 
+    def stream_start_time(self, name: str) -> float:
+        """Return the earliest timestamp in stream *name* on the reference clock.
+
+        Args:
+            name: Stream name as passed to :meth:`add_stream`.
+
+        Returns:
+            Minimum timestamp (float, seconds) in the stream.
+
+        Raises:
+            KeyError: If *name* is not a registered stream.
+        """
+        return float(self.get_timestamps(name).min())
+
+    def stream_end_time(self, name: str) -> float:
+        """Return the latest timestamp in stream *name* on the reference clock.
+
+        Args:
+            name: Stream name as passed to :meth:`add_stream`.
+
+        Returns:
+            Maximum timestamp (float, seconds) in the stream.
+
+        Raises:
+            KeyError: If *name* is not a registered stream.
+        """
+        return float(self.get_timestamps(name).max())
+
+    def temporal_overlap(self) -> Optional[tuple[float, float]]:
+        """Return the time range over which **all** registered streams overlap.
+
+        The overlap is the intersection of each stream's time range:
+        ``[max(start_times), min(end_times)]``.  This is the range that can
+        be safely passed to :meth:`synchronise` without boundary clamping.
+
+        Returns:
+            ``(overlap_start, overlap_end)`` tuple of reference-clock
+            timestamps if the overlap is non-empty (i.e.
+            ``overlap_start < overlap_end``), or ``None`` if there is no
+            overlap or fewer than two streams are registered.
+
+        Example::
+
+            sync = SensorSynchroniser()
+            sync.add_stream("lidar", lidar_times, lidar_data)
+            sync.add_stream("imu", imu_times, imu_data)
+
+            result = sync.temporal_overlap()
+            if result is None:
+                raise RuntimeError("Streams do not overlap — check time offsets.")
+            t_start, t_end = result
+        """
+        if len(self._streams) < 2:
+            return None
+        starts = [float(ts.min()) for ts, _ in self._streams.values()]
+        ends = [float(ts.max()) for ts, _ in self._streams.values()]
+        overlap_start = max(starts)
+        overlap_end = min(ends)
+        if overlap_start >= overlap_end:
+            return None
+        return (overlap_start, overlap_end)
+
     # ------------------------------------------------------------------
     # Interpolation
     # ------------------------------------------------------------------
@@ -332,3 +394,10 @@ class SensorSynchroniser:
         """
         ref = np.asarray(reference_times, dtype=float)
         return {name: self.interpolate(name, ref, method=method) for name in self._streams}
+
+    # American-spelling alias for synchronise.
+    synchronize = synchronise
+
+
+# American-spelling alias for SensorSynchroniser.
+SensorSynchronizer = SensorSynchroniser

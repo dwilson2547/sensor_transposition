@@ -96,7 +96,7 @@ Typical use-case
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence
 
 import numpy as np
 
@@ -487,6 +487,7 @@ def optimize_pose_graph(
     max_iterations: int = 20,
     tolerance: float = 1e-6,
     damping: float = 1e-6,
+    callback: Optional[Callable[[int, float], None]] = None,
 ) -> OptimizationResult:
     """Optimise a pose graph using Gauss-Newton iteration.
 
@@ -513,6 +514,14 @@ def optimize_pose_graph(
         damping: Levenberg-Marquardt–style diagonal damping added to the
             Hessian blocks of the free nodes for numerical robustness.
             Default ``1e-6``.
+        callback: Optional callable invoked at the end of every iteration
+            with ``(iteration: int, cost: float)``.  Useful for monitoring
+            progress or implementing early stopping::
+
+                result = optimize_pose_graph(
+                    graph,
+                    callback=lambda i, c: print(f"iter {i}: cost={c:.4f}"),
+                )
 
     Returns:
         :class:`OptimizationResult` containing the optimised poses, final
@@ -651,6 +660,8 @@ def optimize_pose_graph(
             x[node_x_offset + 3: node_x_offset + 6] = _log_so3(R_old @ dR)
 
         step_norm = float(np.linalg.norm(dx_free))
+        if callback is not None:
+            callback(iteration, _total_cost(x, graph, id_to_idx))
         if step_norm < tolerance:
             converged = True
             break

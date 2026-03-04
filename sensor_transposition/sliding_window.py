@@ -68,7 +68,7 @@ Sibley, G., Matthies, L., & Sukhatme, G. (2010).
 from __future__ import annotations
 
 from collections import deque
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -394,7 +394,10 @@ class SlidingWindowSmoother:
     # Optimisation
     # ------------------------------------------------------------------
 
-    def optimize(self) -> OptimizationResult:
+    def optimize(
+        self,
+        callback: Optional[Callable[[int, float], None]] = None,
+    ) -> OptimizationResult:
         """Optimise the active window and return the result.
 
         Builds a :class:`~sensor_transposition.pose_graph.PoseGraph` from:
@@ -413,6 +416,12 @@ class SlidingWindowSmoother:
         After optimisation the stored poses for active nodes are updated with
         the optimised values, improving the quality of subsequent
         marginalisation steps.
+
+        Args:
+            callback: Optional callable invoked at the end of every
+                Gauss-Newton iteration with ``(iteration: int, cost: float)``.
+                Forwarded directly to
+                :func:`~sensor_transposition.pose_graph.optimize_pose_graph`.
 
         Returns:
             :class:`~sensor_transposition.pose_graph.OptimizationResult`
@@ -479,6 +488,7 @@ class SlidingWindowSmoother:
             max_iterations=self._max_iterations,
             tolerance=self._tolerance,
             damping=self._damping,
+            callback=callback,
         )
 
         # Update stored poses with the optimised values so that subsequent

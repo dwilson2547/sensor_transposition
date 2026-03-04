@@ -667,6 +667,46 @@ class ScanContextDatabase:
         candidates.sort(key=lambda c: c.distance)
         return candidates[:top_k]
 
+    def compute_descriptor(
+        self,
+        points: np.ndarray,
+        *,
+        min_z: float | None = None,
+        max_z: float | None = None,
+    ) -> ScanContextDescriptor:
+        """Compute a Scan Context descriptor using the database's own parameters.
+
+        This is a convenience wrapper around :func:`compute_scan_context` that
+        uses the ``num_rings``, ``num_sectors``, and ``max_range`` values that
+        were set when the database was constructed, so the caller never has to
+        repeat them.  Using this method guarantees that descriptors are always
+        compatible with the database.
+
+        Args:
+            points: ``(N, 3)`` float array of XYZ LiDAR point coordinates.
+            min_z: Optional lower z-clipping plane (metres).
+            max_z: Optional upper z-clipping plane (metres).
+
+        Returns:
+            :class:`ScanContextDescriptor` compatible with this database.
+
+        Example::
+
+            db = ScanContextDatabase(num_rings=20, num_sectors=60, max_range=80.0)
+            for frame_id, cloud in enumerate(lidar_frames):
+                desc = db.compute_descriptor(cloud)  # parameters always match
+                candidates = db.query(desc, top_k=1)
+                db.add(desc, frame_id=frame_id)
+        """
+        return compute_scan_context(
+            points,
+            num_rings=self.num_rings,
+            num_sectors=self.num_sectors,
+            max_range=self.max_range,
+            min_z=min_z,
+            max_z=max_z,
+        )
+
     def __len__(self) -> int:
         """Return the number of descriptors currently stored."""
         return len(self._descriptors)
