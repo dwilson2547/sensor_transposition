@@ -247,7 +247,17 @@ visualiser in one step.
 
 ## 4. Error Handling & Robustness
 
-### 4.1 Inconsistent exception types across the library
+### 4.1 Inconsistent exception types across the library ✓
+
+**Status:** Implemented — `sensor_transposition/exceptions.py` added with
+`SensorTranspositionError` (base), `SensorNotFoundError` (inherits `KeyError`),
+`BagError` (inherits `RuntimeError`), and `CalibrationError` (inherits `ValueError`).
+`SensorCollection.get_sensor()` now raises `SensorNotFoundError`;
+`BagWriter.write()` and `BagReader.read_messages()` now raise `BagError` when
+the writer/reader is closed.  All subclasses also inherit from the corresponding
+standard exception so existing `except KeyError / RuntimeError / ValueError`
+handlers continue to work.  All four exception classes are exported from the
+top-level `sensor_transposition` package.
 
 **Problem:** Different modules raise different exception types for similar situations:
 - `SensorCollection.get_sensor()` raises `KeyError`
@@ -265,17 +275,13 @@ migrate the most user-facing error sites to use them.
 
 ---
 
-### 4.2 Pose graph optimization has no maximum-iteration / timeout safeguard
+### 4.2 Pose graph optimization has no maximum-iteration / timeout safeguard ✓
 
-**Problem:** `optimize_pose_graph()` runs Gauss-Newton iterations but has a hard
-upper limit of 50 iterations with no timeout option.  On degenerate graphs (e.g., a
-single poorly-conditioned loop closure edge) the optimizer may oscillate without
-converging, and the user has no way to detect this without inspecting the returned
-`cost_history`.
-
-**Suggested fix:** Expose a `max_iterations` parameter in the public API (it is
-currently a hard-coded internal constant) and document what `converged=False` in the
-return value means for downstream consumers.
+**Status:** Implemented — `max_iterations` is exposed as a public keyword argument
+(default ``20``) to `optimize_pose_graph()`.  The returned `OptimizationResult`
+includes a `success` field that is ``False`` when the solver did not converge
+within *max_iterations* steps, allowing downstream code to detect and handle
+non-converged results.
 
 ---
 
@@ -364,11 +370,11 @@ recommended extension ("sensor bag") and what it stands for.
 - [x] Document `.sbag` extension in README and `rosbag.py`
 
 ### Low Impact
-- [ ] Define a small library-specific exception hierarchy
-- [ ] Expose `max_iterations` in `optimize_pose_graph` public API
 - [ ] Cache `FramePose.transform` with `functools.cached_property`
 - [ ] Clarify `deskew_scan` `ref_timestamp` convention in docstring
 - [ ] Add ROS `int8` export note to README occupancy grid section
 - [ ] Add compact `__repr__` to `FramePose`, `IcpResult`, and `OdometryResult`
 - [x] Add `sbag_to_rosbag` conversion helper (or MCAP writer option)
 - [x] Add `Pipeline` / `SLAMSession` orchestration class or reference example
+- [x] Define a small library-specific exception hierarchy
+- [x] Expose `max_iterations` in `optimize_pose_graph` public API

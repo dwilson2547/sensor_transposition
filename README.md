@@ -40,6 +40,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
   - [Bag Recorder / Player](#bag-recorder--player)
   - [Camera–LiDAR Extrinsic Calibration](#cameralidar-extrinsic-calibration)
   - [SLAM Session (Pipeline Orchestration)](#slam-session-pipeline-orchestration)
+- [Error Handling](#error-handling)
 - [Configuration Example](#configuration-example)
 - [Quick-Start: End-to-End SLAM Pipeline](#quick-start-end-to-end-slam-pipeline)
 - [ROS Examples](#ros-examples)
@@ -1153,6 +1154,60 @@ with BagReader("session.sbag") as bag:
 All internal components are accessible as properties for advanced use:
 `session.pose_graph`, `session.loop_db`, `session.trajectory`,
 `session.point_cloud_map`.
+
+---
+
+## Error Handling
+
+`sensor_transposition` defines a small hierarchy of library-specific exceptions
+in `sensor_transposition.exceptions`.  Every exception inherits from the base
+class **`SensorTranspositionError`** so a single `except` clause can catch any
+library error.  Each subclass also inherits from the appropriate standard
+Python exception so existing `except KeyError / RuntimeError / ValueError`
+handlers continue to work without change.
+
+| Exception | Inherits from | Raised when |
+|---|---|---|
+| `SensorTranspositionError` | `Exception` | Base class for all library errors |
+| `SensorNotFoundError` | `SensorTranspositionError`, `KeyError` | `SensorCollection.get_sensor()` — sensor name not found |
+| `BagError` | `SensorTranspositionError`, `RuntimeError` | `BagWriter.write()` / `BagReader.read_messages()` — writer or reader is closed |
+| `CalibrationError` | `SensorTranspositionError`, `ValueError` | Calibration operations that fail with invalid input |
+
+```python
+from sensor_transposition.exceptions import (
+    SensorTranspositionError,
+    SensorNotFoundError,
+    BagError,
+)
+
+# Catch a specific library exception:
+try:
+    sensor = collection.get_sensor("unknown_lidar")
+except SensorNotFoundError as exc:
+    print(f"Sensor not found: {exc}")
+
+# Or catch all library exceptions at once:
+try:
+    bag.write("/lidar/points", timestamp, payload)
+except SensorTranspositionError as exc:
+    print(f"sensor_transposition error: {exc}")
+
+# Existing KeyError / RuntimeError handlers also work unchanged:
+try:
+    sensor = collection.get_sensor("front_camera")
+except KeyError:
+    pass  # SensorNotFoundError is a KeyError
+```
+
+All four classes are exported from the top-level package:
+
+```python
+import sensor_transposition as st
+st.SensorNotFoundError
+st.BagError
+st.CalibrationError
+st.SensorTranspositionError
+```
 
 ---
 

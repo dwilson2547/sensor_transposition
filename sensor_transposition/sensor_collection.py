@@ -23,6 +23,8 @@ from typing import List, Optional
 import numpy as np
 import yaml
 
+from sensor_transposition.exceptions import SensorNotFoundError
+
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
@@ -368,10 +370,14 @@ class SensorCollection:
         del self._sensors[name]
 
     def get_sensor(self, name: str) -> Sensor:
-        """Retrieve a sensor by name."""
+        """Retrieve a sensor by name.
+
+        Raises:
+            SensorNotFoundError: If *name* is not present in the collection.
+        """
         if name not in self._sensors:
-            raise KeyError(f"Sensor '{name}' not found in collection. "
-                           f"Available: {list(self._sensors)}")
+            raise SensorNotFoundError(f"Sensor '{name}' not found in collection. "
+                                      f"Available: {list(self._sensors)}")
         return self._sensors[name]
 
     @property

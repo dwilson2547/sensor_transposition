@@ -109,6 +109,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, Iterator, List, Optional, Union
 
+from sensor_transposition.exceptions import BagError
 
 # ---------------------------------------------------------------------------
 # File format constants
@@ -251,10 +252,10 @@ class BagWriter:
             ValueError: If *topic* is empty or *data* is not a ``dict``.
             TypeError: If *data* contains non-JSON-serialisable values that
                 are not numpy arrays.
-            RuntimeError: If the writer has already been closed.
+            BagError: If the writer has already been closed.
         """
         if self._file is None or self._file.closed:
-            raise RuntimeError("BagWriter is closed.")
+            raise BagError("BagWriter is closed.")
         if not topic:
             raise ValueError("topic must be a non-empty string.")
         if not isinstance(data, dict):
@@ -426,10 +427,10 @@ class BagReader:
             :class:`BagMessage` objects in recording order.
 
         Raises:
-            RuntimeError: If the reader has been closed.
+            BagError: If the reader has been closed.
         """
         if self._file is None or self._file.closed:
-            raise RuntimeError("BagReader is closed.")
+            raise BagError("BagReader is closed.")
 
         # Normalise topics filter.
         topic_set: Optional[set[str]] = None

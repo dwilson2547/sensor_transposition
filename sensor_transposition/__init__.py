@@ -36,6 +36,13 @@ from sensor_transposition import voxel_map
 from sensor_transposition import submap_manager
 from sensor_transposition import slam_session
 from sensor_transposition.slam_session import SLAMSession
+from sensor_transposition import exceptions
+from sensor_transposition.exceptions import (
+    SensorTranspositionError,
+    SensorNotFoundError,
+    BagError,
+    CalibrationError,
+)
 
 __all__ = [
     "SensorCollection",
@@ -76,4 +83,9 @@ __all__ = [
     "submap_manager",
     "slam_session",
     "SLAMSession",
+    "exceptions",
+    "SensorTranspositionError",
+    "SensorNotFoundError",
+    "BagError",
+    "CalibrationError",
 ]
