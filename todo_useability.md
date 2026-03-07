@@ -334,10 +334,10 @@ recommended extension ("sensor bag") and what it stands for.
 ## Summary Checklist
 
 ### High Impact
-- [ ] Update README to document all 15+ new modules added during the SLAM sprint
-- [ ] Add an end-to-end `examples/slam_pipeline.py` quick-start script
-- [ ] Export `calibration.py` functions in `__init__.py` and README
-- [ ] Add `GpsFuser` documentation to the README GPS section
+- [x] Update README to document all 15+ new modules added during the SLAM sprint
+- [x] Add an end-to-end `examples/slam_pipeline.py` quick-start script
+- [x] Export `calibration.py` functions in `__init__.py` and README
+- [x] Add `GpsFuser` documentation to the README GPS section
 - [x] Give `ScanContextDatabase` a `compute_descriptor(cloud)` method to avoid
       duplicated parameters
 - [x] Add `BagWriter` numpy-array auto-conversion to prevent cryptic `TypeError`
