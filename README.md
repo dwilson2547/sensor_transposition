@@ -18,6 +18,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
   - [LiDAR–Camera Fusion](#lidar-camera-fusion)
   - [LiDAR Parsers](#lidar-parsers)
   - [LiDAR Scan Matching](#lidar-scan-matching)
+  - [KISS-ICP Odometry](#kiss-icp-odometry)
   - [LiDAR Motion Distortion Correction](#lidar-motion-distortion-correction)
   - [GPS / GNSS](#gps--gnss)
   - [GPS Coordinate-Frame Converter](#gps-coordinate-frame-converter)
@@ -55,7 +56,8 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
 - **Homogeneous transforms** – composable 4×4 `Transform` objects with helpers for building from quaternions or rotation matrices, inverting, and applying to point clouds.
 - **LiDAR–camera fusion** – project 3-D LiDAR point clouds onto a camera image plane and colour the cloud by sampling pixel values.
 - **LiDAR parsers** – binary readers for Velodyne (KITTI `.bin`), Ouster (4-column and 8-column `.bin`), and Livox (LVX / LVX2) file formats.
-- **LiDAR scan matching** – point-to-point ICP (Iterative Closest Point) with the Kabsch SVD algorithm and a KD-tree nearest-neighbour search; supports a maximum correspondence-distance filter, an optional initial transform, and a configurable convergence tolerance.
+- **LiDAR scan matching** – point-to-point ICP (Iterative Closest Point) with the Kabsch SVD algorithm and a KD-tree nearest-neighbour search; point-to-plane ICP with per-point surface normal estimation via PCA for faster convergence on structured scenes (walls, floors, roads); supports a maximum correspondence-distance filter, an optional initial transform, and a configurable convergence tolerance.
+- **KISS-ICP odometry** – minimal-parameter LiDAR odometry with adaptive correspondence-distance threshold, voxel-hashed local map, and point-to-point ICP; pure NumPy/SciPy — no additional dependencies required.  An optional `kiss_icp` extra pulls in the upstream reference implementation.
 - **LiDAR motion distortion correction** – IMU-based scan deskewing that corrects per-point timestamps across a spinning LiDAR sweep.
 - **GPS / GNSS** – NMEA 0183 parser supporting GGA and RMC sentence types, plus a coordinate-frame converter for ECEF ↔ ENU and geodetic ↔ UTM conversions.
 - **GPS fusion** – `GpsFuser` converts GPS fixes to local ENU and integrates them into an `ImuEkf` state or a `FramePoseSequence`; `hdop_to_noise` converts HDOP to a 3×3 position noise covariance.
@@ -75,7 +77,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
 - **Point-cloud map** – accumulated coloured point-cloud map with voxel-grid downsampling and PCD / PLY I/O.
 - **Visualisation** – BEV rendering, trajectory overlay, LiDAR-on-image overlay, Open3D and RViz export helpers.
 - **Bag recorder / player** – lightweight multi-topic binary bag format (`.sbag`) with streaming write and indexed playback; no external dependencies.  `sbag_to_rosbag()` converts to MCAP for use with `ros2 bag` (requires `pip install ".[mcap]"`).
-- **SLAM session** – `SLAMSession` orchestration class that wires ICP odometry, Scan Context loop closure, pose-graph optimisation, and point-cloud map accumulation into a single object with sensible defaults and per-topic callbacks.
+- **SLAM session** – `SLAMSession` orchestration class that wires ICP odometry, Scan Context loop closure, pose-graph optimisation, and point-cloud map accumulation into a single object with sensible defaults and per-topic callbacks.  Supports scan-to-local-submap odometry via `use_local_map=True` to reduce frame-to-frame drift.  A `LocalMap` helper class maintains a downsampled sliding window of the last N keyframe scans.
 - **Camera–LiDAR extrinsic calibration** – target-based extrinsic calibration using plane correspondences (`fit_plane`, `ransac_plane`, `calibrate_lidar_camera`).
 - **ROS examples** – ready-to-use launch / parameter files for Velodyne and Ouster LiDARs in both ROS 1 and ROS 2.
 
@@ -104,11 +106,13 @@ Install optional extras to unlock additional integrations:
 | `open3d` | `open3d>=0.17` | `export_point_cloud_open3d()` and Open3D visualisation |
 | `rerun` | `rerun-sdk>=0.14` | rerun.io visualisation logging |
 | `mcap` | `mcap>=1.0` | `sbag_to_rosbag()` MCAP conversion |
+| `kiss_icp` | `kiss-icp>=1.0` | Upstream reference KISS-ICP implementation |
 
 ```bash
-pip install ".[open3d]"   # Open3D support
-pip install ".[rerun]"    # rerun.io support
-pip install ".[mcap]"     # MCAP / ROS 2 bag conversion
+pip install ".[open3d]"    # Open3D support
+pip install ".[rerun]"     # rerun.io support
+pip install ".[mcap]"      # MCAP / ROS 2 bag conversion
+pip install ".[kiss_icp]"  # Upstream KISS-ICP reference implementation
 ```
 
 ---
@@ -397,7 +401,9 @@ Supported data types: Cartesian float32 (type 0), Spherical float32 (type 1), Ca
 
 ### LiDAR Scan Matching
 
-Point-to-point ICP (Iterative Closest Point) scan matching for LiDAR frame-to-frame odometry and map-to-scan localisation.
+Point-to-point and point-to-plane ICP (Iterative Closest Point) scan matching for LiDAR frame-to-frame odometry and map-to-scan localisation.
+
+#### Point-to-point ICP
 
 ```python
 from sensor_transposition.lidar.scan_matching import icp_align
@@ -440,9 +446,107 @@ The returned `IcpResult` contains:
 - `num_iterations` – iterations actually performed
 - `mean_squared_error` – final mean squared point-to-point distance (inliers only)
 
+#### Point-to-plane ICP
+
+Point-to-plane ICP minimises the sum of squared distances from each source point to the **tangent plane** of its nearest target point.  It converges in roughly half as many iterations as point-to-point ICP on structured indoor/outdoor scenes and is the standard variant used in production LiDAR SLAM systems (Cartographer, LOAM, LIO-SAM).
+
+```python
+from sensor_transposition.lidar.scan_matching import (
+    icp_align_point_to_plane,
+    point_cloud_normals,
+)
+
+# Point-to-plane ICP (normals estimated automatically)
+result = icp_align_point_to_plane(source_xyz, target_xyz, max_iterations=50)
+
+if result.converged:
+    R = result.transform[:3, :3]
+    t = result.transform[:3, 3]
+    aligned = (R @ source_xyz.T).T + t
+
+# Pre-compute normals once for repeated use with the same target
+target_normals = point_cloud_normals(target_xyz, k=20)
+result = icp_align_point_to_plane(
+    source_xyz, target_xyz,
+    target_normals=target_normals,
+)
+```
+
+**Additional parameters for `icp_align_point_to_plane`:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `target_normals` | `None` | Pre-computed ``(M, 3)`` unit normals for the target cloud.  Auto-estimated if not supplied. |
+| `normals_k` | `20` | Neighbours used for automatic normal estimation |
+
+#### Per-point surface normals
+
+```python
+from sensor_transposition.lidar.scan_matching import point_cloud_normals
+
+# Estimate surface normals via PCA on k-nearest neighbours
+normals = point_cloud_normals(cloud, k=20)   # (N, 3) unit vectors
+```
+
+`point_cloud_normals` returns one unit-length surface normal per point,
+computed via PCA on the k-nearest neighbours of each point using a KD-tree.
+Normals are consistently oriented toward the cloud centroid.
+
 ---
 
-### LiDAR Motion Distortion Correction
+### KISS-ICP Odometry
+
+KISS-ICP (Keep It Small and Simple ICP) is a minimal-parameter LiDAR odometry
+algorithm that uses an **adaptive correspondence-distance threshold** and a
+**voxel-hashed local map** to outperform vanilla ICP with essentially no
+tuning.  The implementation here is pure NumPy/SciPy — no additional
+dependencies required.
+
+```python
+from sensor_transposition.lidar.kiss_icp_odometry import KissIcpOdometry
+
+# Create the odometry estimator
+odometry = KissIcpOdometry(voxel_size=0.5)
+
+# Register each LiDAR scan; returns the current 4×4 ego pose (world ← sensor)
+poses = []
+for scan in lidar_scans:
+    pose = odometry.register_frame(scan)
+    poses.append(pose)
+```
+
+**Constructor parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `voxel_size` | `0.5` | Voxel edge length for input downsampling and local map (metres) |
+| `max_iterations` | `50` | Maximum ICP iterations per frame |
+| `tolerance` | `1e-4` | ICP convergence tolerance |
+| `initial_threshold` | `2.0` | Initial adaptive-threshold σ̂ (metres) |
+| `min_threshold` | `0.1` | Minimum correspondence threshold (metres) |
+| `max_threshold` | `10.0` | Maximum correspondence threshold (metres) |
+| `local_map_max_voxels` | `100 000` | Maximum voxels retained in the local map |
+
+**Properties and methods:**
+
+```python
+odometry.pose             # Current 4×4 ego pose (copy)
+odometry.local_map        # VoxelHashMap instance
+odometry.adaptive_threshold   # AdaptiveThreshold instance
+odometry.reset()          # Reset pose, local map, and threshold
+```
+
+**Installing the upstream reference implementation** (optional):
+
+```bash
+pip install ".[kiss_icp]"   # installs kiss-icp>=1.0
+```
+
+Users who want the full, C++-accelerated upstream KISS-ICP library can
+install the `kiss_icp` optional extra and use it directly alongside or
+instead of the pure-Python implementation provided here.
+
+---
 
 Correct per-point motion distortion in a spinning LiDAR scan using IMU data.
 
@@ -1141,6 +1245,38 @@ session.optimize()
 session.point_cloud_map.voxel_downsample(voxel_size=0.10)
 session.point_cloud_map.save_pcd("map.pcd")
 session.trajectory.to_csv("trajectory.csv")
+```
+
+#### Scan-to-local-submap odometry
+
+By default each incoming scan is matched against the immediately preceding
+scan.  Pass ``use_local_map=True`` to match against a sliding-window
+accumulation of the last N keyframes (a :class:`LocalMap`) instead.  This
+provides more ICP constraints simultaneously and significantly reduces
+frame-to-frame odometry drift before it enters the pose graph.
+
+```python
+from sensor_transposition.slam_session import SLAMSession, LocalMap
+
+with BagReader("session.sbag") as bag:
+    session = SLAMSession()
+    session.run(
+        bag,
+        use_local_map=True,
+        local_map_size=10,           # keep last 10 keyframes
+        local_map_voxel_size=0.2,    # downsample each keyframe to 20-cm voxels
+    )
+```
+
+You can also use :class:`LocalMap` directly outside of `SLAMSession`:
+
+```python
+local_map = LocalMap(window_size=10, voxel_size=0.2)
+
+for scan in lidar_scans:
+    local_map.add_keyframe(scan)
+    submap = local_map.get_submap()   # (M, 3) float array
+    result = icp_align(scan, submap)
 ```
 
 Register callbacks for other sensor topics:

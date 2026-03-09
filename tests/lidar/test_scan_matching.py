@@ -288,3 +288,142 @@ class TestIcpResult:
         assert result.num_iterations == 5
         assert result.mean_squared_error == pytest.approx(0.001)
         np.testing.assert_array_equal(result.transform, T)
+
+
+# ===========================================================================
+# point_cloud_normals
+# ===========================================================================
+
+
+from sensor_transposition.lidar.scan_matching import (
+    point_cloud_normals,
+    icp_align_point_to_plane,
+)
+
+
+class TestPointCloudNormals:
+    """Tests for point_cloud_normals()."""
+
+    def _flat_cloud(self, n: int = 200, seed: int = 0) -> np.ndarray:
+        """Flat XY plane with small random z noise."""
+        rng = np.random.default_rng(seed)
+        xy = rng.uniform(-5.0, 5.0, (n, 2))
+        z = rng.uniform(-0.01, 0.01, (n, 1))
+        return np.hstack([xy, z])
+
+    def test_output_shape(self):
+        cloud = _random_cloud(100)
+        normals = point_cloud_normals(cloud, k=10)
+        assert normals.shape == (100, 3)
+
+    def test_unit_length(self):
+        """Each returned normal should have unit length."""
+        cloud = _random_cloud(80)
+        normals = point_cloud_normals(cloud, k=10)
+        lengths = np.linalg.norm(normals, axis=1)
+        np.testing.assert_allclose(lengths, np.ones(80), atol=1e-10)
+
+    def test_flat_plane_normals_point_up(self):
+        """For a flat XY plane, normals should be close to ±z."""
+        cloud = self._flat_cloud(n=200)
+        normals = point_cloud_normals(cloud, k=15)
+        # The z-component of each normal should dominate.
+        assert np.mean(np.abs(normals[:, 2])) > 0.9
+
+    def test_k_less_than_3_raises(self):
+        cloud = _random_cloud(50)
+        with pytest.raises(ValueError, match="k must be >= 3"):
+            point_cloud_normals(cloud, k=2)
+
+    def test_wrong_shape_raises(self):
+        with pytest.raises(ValueError, match="\\(N, 3\\)"):
+            point_cloud_normals(np.ones((10, 4)), k=5)
+
+    def test_k_larger_than_cloud_clamped(self):
+        """k > N should not raise; normals should still be unit length."""
+        cloud = _random_cloud(10)
+        normals = point_cloud_normals(cloud, k=100)  # k >> N
+        assert normals.shape == (10, 3)
+        lengths = np.linalg.norm(normals, axis=1)
+        np.testing.assert_allclose(lengths, np.ones(10), atol=1e-10)
+
+
+# ===========================================================================
+# icp_align_point_to_plane
+# ===========================================================================
+
+
+class TestIcpAlignPointToPlane:
+    """Tests for icp_align_point_to_plane()."""
+
+    def test_returns_icp_result(self):
+        pts = _random_cloud(100)
+        result = icp_align_point_to_plane(pts, pts)
+        assert isinstance(result, IcpResult)
+
+    def test_transform_shape(self):
+        pts = _random_cloud(50)
+        result = icp_align_point_to_plane(pts, pts)
+        assert result.transform.shape == (4, 4)
+
+    def test_identity_when_src_eq_tgt(self):
+        pts = _random_cloud(100)
+        result = icp_align_point_to_plane(pts, pts)
+        np.testing.assert_allclose(result.transform, np.eye(4), atol=1e-5)
+
+    def test_converged_on_identical_clouds(self):
+        pts = _random_cloud(100)
+        result = icp_align_point_to_plane(pts, pts)
+        assert result.converged
+
+    def test_recovers_translation(self):
+        pts = _random_cloud(300, seed=10)
+        t_true = np.array([0.3, -0.2, 0.1])
+        src = pts + t_true
+        result = icp_align_point_to_plane(src, pts, max_iterations=100)
+        recovered = _apply_transform(result.transform, src)
+        np.testing.assert_allclose(recovered, pts, atol=1e-3)
+
+    def test_small_rotation_converges(self):
+        pts = _random_cloud(300, seed=11)
+        R_true = _rotation_z(math.radians(4))
+        src = (R_true @ pts.T).T
+        result = icp_align_point_to_plane(src, pts, max_iterations=100)
+        recovered = _apply_transform(result.transform, src)
+        np.testing.assert_allclose(recovered, pts, atol=1e-2)
+
+    def test_precomputed_normals_accepted(self):
+        pts = _random_cloud(100)
+        normals = point_cloud_normals(pts, k=10)
+        result = icp_align_point_to_plane(pts, pts, target_normals=normals)
+        np.testing.assert_allclose(result.transform, np.eye(4), atol=1e-5)
+
+    def test_normals_wrong_shape_raises(self):
+        pts = _random_cloud(50)
+        bad_normals = np.ones((30, 3))  # wrong count
+        with pytest.raises(ValueError, match="target_normals shape"):
+            icp_align_point_to_plane(pts, pts, target_normals=bad_normals)
+
+    def test_max_iterations_zero_raises(self):
+        pts = _random_cloud(20)
+        with pytest.raises(ValueError, match="max_iterations"):
+            icp_align_point_to_plane(pts, pts, max_iterations=0)
+
+    def test_negative_tolerance_raises(self):
+        pts = _random_cloud(20)
+        with pytest.raises(ValueError, match="tolerance"):
+            icp_align_point_to_plane(pts, pts, tolerance=-1.0)
+
+    def test_initial_transform_applied(self):
+        pts = _random_cloud(150, seed=12)
+        R_true = _rotation_z(math.radians(6))
+        t_true = np.array([0.2, 0.1, 0.0])
+        T_true = _make_transform(R_true, t_true)
+        src = _apply_transform(T_true, pts)
+        result = icp_align_point_to_plane(
+            src, pts,
+            initial_transform=np.linalg.inv(T_true),
+            max_iterations=50,
+        )
+        recovered = _apply_transform(result.transform, src)
+        np.testing.assert_allclose(recovered, pts, atol=1e-2)

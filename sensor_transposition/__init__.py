@@ -35,7 +35,7 @@ from sensor_transposition import occupancy_grid
 from sensor_transposition import voxel_map
 from sensor_transposition import submap_manager
 from sensor_transposition import slam_session
-from sensor_transposition.slam_session import SLAMSession
+from sensor_transposition.slam_session import SLAMSession, LocalMap
 from sensor_transposition import exceptions
 from sensor_transposition.exceptions import (
     SensorTranspositionError,
@@ -83,6 +83,7 @@ __all__ = [
     "submap_manager",
     "slam_session",
     "SLAMSession",
+    "LocalMap",
     "exceptions",
     "SensorTranspositionError",
     "SensorNotFoundError",
