@@ -92,14 +92,14 @@ methods exist as importable, tested functions in the `sensor_transposition`
 package.  Users must copy-paste code from the documentation, which is error-
 prone and defeats the purpose of having a library.
 
-- [ ] Create `sensor_transposition/ground_plane.py` with the following public
+- [x] Create `sensor_transposition/ground_plane.py` with the following public
   API:
   - `height_threshold_segment(cloud, threshold=0.3)` → `(ground_mask, non_ground_mask)`
   - `ransac_ground_plane(cloud, distance_threshold=0.2, max_iterations=1000, normal_threshold=0.9)` → `(ground_mask, plane_coefficients)`
   - `normal_based_segment(cloud, k=20, verticality_threshold=0.85)` → `(ground_mask, normals)`
-- [ ] Export the new functions from `sensor_transposition/__init__.py`.
-- [ ] Add unit tests in `tests/test_ground_plane.py`.
-- [ ] Add a **Ground Plane Segmentation** section to the README that references
+- [x] Export the new functions from `sensor_transposition/__init__.py`.
+- [x] Add unit tests in `tests/test_ground_plane.py`.
+- [x] Add a **Ground Plane Segmentation** section to the README that references
   the existing guide in `docs/ground_plane_identification.md`.
 
 ---
@@ -341,7 +341,7 @@ processed.
 ### High Priority
 - [x] Add `point_cloud_normals()` utility and `icp_align_point_to_plane()` to
       `lidar/scan_matching.py`
-- [ ] Create `ground_plane.py` module with height-threshold, RANSAC, and
+- [x] Create `ground_plane.py` module with height-threshold, RANSAC, and
       normal-based segmentation functions (currently only in docs)
 - [ ] Add visual feature detection / matching to support a complete visual
       odometry pipeline without external dependencies
