@@ -36,6 +36,12 @@ from sensor_transposition import voxel_map
 from sensor_transposition import submap_manager
 from sensor_transposition import slam_session
 from sensor_transposition.slam_session import SLAMSession, LocalMap
+from sensor_transposition import ground_plane
+from sensor_transposition.ground_plane import (
+    height_threshold_segment,
+    ransac_ground_plane,
+    normal_based_segment,
+)
 from sensor_transposition import exceptions
 from sensor_transposition.exceptions import (
     SensorTranspositionError,
@@ -84,6 +90,10 @@ __all__ = [
     "slam_session",
     "SLAMSession",
     "LocalMap",
+    "ground_plane",
+    "height_threshold_segment",
+    "ransac_ground_plane",
+    "normal_based_segment",
     "exceptions",
     "SensorTranspositionError",
     "SensorNotFoundError",

@@ -19,6 +19,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
   - [LiDAR Parsers](#lidar-parsers)
   - [LiDAR Scan Matching](#lidar-scan-matching)
   - [KISS-ICP Odometry](#kiss-icp-odometry)
+  - [Ground Plane Segmentation](#ground-plane-segmentation)
   - [LiDAR Motion Distortion Correction](#lidar-motion-distortion-correction)
   - [GPS / GNSS](#gps--gnss)
   - [GPS Coordinate-Frame Converter](#gps-coordinate-frame-converter)
@@ -58,6 +59,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
 - **LiDAR parsers** – binary readers for Velodyne (KITTI `.bin`), Ouster (4-column and 8-column `.bin`), and Livox (LVX / LVX2) file formats.
 - **LiDAR scan matching** – point-to-point ICP (Iterative Closest Point) with the Kabsch SVD algorithm and a KD-tree nearest-neighbour search; point-to-plane ICP with per-point surface normal estimation via PCA for faster convergence on structured scenes (walls, floors, roads); supports a maximum correspondence-distance filter, an optional initial transform, and a configurable convergence tolerance.
 - **KISS-ICP odometry** – minimal-parameter LiDAR odometry with adaptive correspondence-distance threshold, voxel-hashed local map, and point-to-point ICP; pure NumPy/SciPy — no additional dependencies required.  An optional `kiss_icp` extra pulls in the upstream reference implementation.
+- **Ground plane segmentation** – three complementary methods for separating ground points from obstacles: height-threshold (fast, flat terrain), RANSAC plane fitting (robust to outliers and unknown sensor height), and normal-based filtering (handles uneven/hilly terrain via per-point PCA normals); all pure NumPy/SciPy.
 - **LiDAR motion distortion correction** – IMU-based scan deskewing that corrects per-point timestamps across a spinning LiDAR sweep.
 - **GPS / GNSS** – NMEA 0183 parser supporting GGA and RMC sentence types, plus a coordinate-frame converter for ECEF ↔ ENU and geodetic ↔ UTM conversions.
 - **GPS fusion** – `GpsFuser` converts GPS fixes to local ENU and integrates them into an `ImuEkf` state or a `FramePoseSequence`; `hdop_to_noise` converts HDOP to a 3×3 position noise covariance.
@@ -547,6 +549,61 @@ install the `kiss_icp` optional extra and use it directly alongside or
 instead of the pure-Python implementation provided here.
 
 ---
+
+### Ground Plane Segmentation
+
+Separate ground points from obstacles in a LiDAR point cloud using one of
+three methods.  All methods assume the cloud is in a frame where the **ground
+normal points toward +Z** (e.g. the FLU ego frame).  See
+[`docs/ground_plane_identification.md`](docs/ground_plane_identification.md)
+for a detailed guide with worked examples.
+
+```python
+from sensor_transposition.ground_plane import (
+    height_threshold_segment,
+    ransac_ground_plane,
+    normal_based_segment,
+)
+import numpy as np
+
+xyz = np.load("frame.npy")  # (N, 3) float array in the ego frame
+
+# ── Method 1: Height threshold (fast, flat terrain) ──────────────────────
+ground_mask, non_ground_mask = height_threshold_segment(xyz, threshold=0.3)
+ground_pts = xyz[ground_mask]
+obstacles  = xyz[non_ground_mask]
+
+# ── Method 2: RANSAC plane fitting (robust, works on tilted ground) ───────
+ground_mask, plane = ransac_ground_plane(
+    xyz,
+    distance_threshold=0.2,   # inlier tolerance in metres
+    max_iterations=1000,
+    normal_threshold=0.9,     # min cos(angle) between plane normal and +Z
+)
+a, b, c, d = plane  # ax + by + cz + d = 0  (unit normal oriented to +Z)
+
+# ── Method 3: Normal-based (best for uneven / hilly terrain) ─────────────
+ground_mask, normals = normal_based_segment(
+    xyz,
+    k=20,                     # k-nearest neighbours for PCA
+    verticality_threshold=0.85,  # min dot product with +Z
+)
+```
+
+**Method comparison:**
+
+| Method | Speed | Terrain | Requires |
+|--------|-------|---------|----------|
+| `height_threshold_segment` | ★★★ | Flat | Known sensor height |
+| `ransac_ground_plane` | ★★ | Flat / mildly sloped | Nothing |
+| `normal_based_segment` | ★ | Hilly / uneven | SciPy |
+
+For best results on structured environments, combine a coarse height
+pre-filter with RANSAC refinement — see the docs guide for the pattern.
+
+---
+
+### LiDAR Motion Distortion Correction
 
 Correct per-point motion distortion in a spinning LiDAR scan using IMU data.
 
