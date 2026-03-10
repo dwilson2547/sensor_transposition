@@ -30,10 +30,10 @@ indoor/outdoor scenes.
 NDT (Normal Distributions Transform), also mentioned in `todo_slam.md` as an
 alternative but never implemented, is even more robust to noise and outliers.
 
-- [ ] Add `point_cloud_normals(cloud, k=20)` utility to
+- [x] Add `point_cloud_normals(cloud, k=20)` utility to
   `lidar/scan_matching.py` (or a new `lidar/normals.py`) that returns per-point
   normals via PCA on k-nearest neighbors using SciPy's `cKDTree`.
-- [ ] Add `icp_align_point_to_plane(source, target, ...)` to
+- [x] Add `icp_align_point_to_plane(source, target, ...)` to
   `lidar/scan_matching.py` that uses the computed target normals to set up and
   solve the point-to-plane linear system via SVD at each iteration.
 - [ ] (Optional / Medium) Add `ndt_align(source, target, voxel_size, ...)`
@@ -53,10 +53,10 @@ last N scans and matches each new scan against the submap.  This leverages
 more constraints simultaneously, significantly reducing odometry drift before
 it enters the pose graph.
 
-- [ ] Add a `LocalMap` helper class (or extend `PointCloudMap`) that maintains
+- [x] Add a `LocalMap` helper class (or extend `PointCloudMap`) that maintains
   a downsampled accumulation of the last N keyframe scans (configurable window)
   in the sensor/ego frame.
-- [ ] Modify `SLAMSession.run()` with a `use_local_map=True` option that
+- [x] Modify `SLAMSession.run()` with a `use_local_map=True` option that
   matches each incoming scan against the `LocalMap` rather than only the
   previous scan.
 
@@ -70,14 +70,14 @@ minimal-parameter LiDAR odometry algorithm that uses an adaptive
 correspondence-distance threshold and a voxel-based local map; it outperforms
 vanilla ICP on most public benchmarks with essentially no tuning.
 
-- [ ] Add a `kiss_icp_odometry.py` module (or extend `lidar/scan_matching.py`)
+- [x] Add a `kiss_icp_odometry.py` module (or extend `lidar/scan_matching.py`)
   that wraps the key KISS-ICP ideas: adaptive threshold estimation, voxel-hashed
   local map, and point-to-point ICP with the adaptive threshold.  Pure NumPy/
   SciPy implementation so no additional dependency is required.
-- [ ] Add a `kiss_icp` optional extra to `pyproject.toml` that pulls in the
+- [x] Add a `kiss_icp` optional extra to `pyproject.toml` that pulls in the
   upstream `kiss-icp` package for users who want the full reference
   implementation.
-- [ ] Document in the README under a new **KISS-ICP** sub-section.
+- [x] Document in the README under a new **KISS-ICP** sub-section.
 
 ---
 
@@ -339,7 +339,7 @@ processed.
 ## Summary Checklist
 
 ### High Priority
-- [ ] Add `point_cloud_normals()` utility and `icp_align_point_to_plane()` to
+- [x] Add `point_cloud_normals()` utility and `icp_align_point_to_plane()` to
       `lidar/scan_matching.py`
 - [ ] Create `ground_plane.py` module with height-threshold, RANSAC, and
       normal-based segmentation functions (currently only in docs)
@@ -347,11 +347,11 @@ processed.
       odometry pipeline without external dependencies
 - [ ] Add map-based localization mode to `SLAMSession` (load existing map,
       localize without modifying it)
-- [ ] Implement scan-to-local-submap odometry to reduce frame-to-frame drift in
+- [x] Implement scan-to-local-submap odometry to reduce frame-to-frame drift in
       `SLAMSession`
 
 ### Medium Priority
-- [ ] Implement KISS-ICP adaptive-threshold odometry
+- [x] Implement KISS-ICP adaptive-threshold odometry
       (pure NumPy/SciPy; reference original `TODO.md`)
 - [ ] Add `ImuFactor` edge type and wire `ImuPreintegrator` output into the
       pose graph for tightly-coupled IMU optimisation
