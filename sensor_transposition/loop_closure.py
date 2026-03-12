@@ -1092,7 +1092,9 @@ class ImageLoopClosureDatabase:
             v = self._vectors[db_idx]
             v_norm = np.linalg.norm(v)
             if q_norm < _ZERO_NORM_THRESHOLD or v_norm < _ZERO_NORM_THRESHOLD:
-                dist = 0.0 if (q_norm < _ZERO_NORM_THRESHOLD and v_norm < _ZERO_NORM_THRESHOLD) else 1.0
+                both_zero = (q_norm < _ZERO_NORM_THRESHOLD
+                             and v_norm < _ZERO_NORM_THRESHOLD)
+                dist = 0.0 if both_zero else 1.0
             else:
                 cos_sim = float(np.dot(q, v) / (q_norm * v_norm))
                 dist = float(1.0 - np.clip(cos_sim, -1.0, 1.0))

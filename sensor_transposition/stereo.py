@@ -121,8 +121,8 @@ def stereo_rectify(
     Returns:
         Tuple ``(R1, R2, P1, P2)`` where:
 
-        * *R1*: 3×3 rectification rotation for the left camera.  Apply to
-          rotation transform camera 1's frame into the common rectified frame.
+        * *R1*: 3×3 rectification rotation for the left camera.  Rotates
+          camera 1's frame into the common rectified frame.
         * *R2*: 3×3 rectification rotation for the right camera.
         * *P1*: 3×4 projection matrix for the left rectified camera
           ``[f, 0, cx, 0; 0, f, cy, 0; 0, 0, 1, 0]``.
