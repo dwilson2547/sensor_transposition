@@ -30,6 +30,8 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
   - [Radar](#radar)
   - [Radar Odometry](#radar-odometry)
   - [Visual Odometry](#visual-odometry)
+  - [Feature Detection & Matching](#feature-detection--matching)
+  - [Stereo Camera](#stereo-camera)
   - [Wheel Odometry](#wheel-odometry)
   - [Loop Closure](#loop-closure)
   - [Pose Graph](#pose-graph)
@@ -69,8 +71,10 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
 - **Radar** – binary parser for 5-field (range, azimuth, elevation, velocity, SNR) detection records with spherical → Cartesian conversion.
 - **Radar odometry** – Doppler-based ego-velocity estimation and scan-to-scan ICP radar odometry.
 - **Visual odometry** – essential-matrix estimation (normalised 8-point + RANSAC), pose recovery, and Perspective-n-Point (PnP) solver.
+- **Feature detection & matching** – Harris corner detector, normalised intensity-patch descriptors, and brute-force L2 matching with Lowe's ratio test; all pure NumPy/SciPy, enabling a complete visual odometry pipeline without OpenCV.  An optional `opencv` extra is available for users who need production-quality ORB/SIFT features.
+- **Stereo camera** – stereo rectification (Bouguet algorithm), dense block-matching disparity (pure NumPy SAD), and stereo triangulation for metric 3-D depth recovery; recovers absolute scale unavailable in monocular VO.
 - **Wheel odometry** – differential-drive and Ackermann (bicycle-model) dead-reckoning with midpoint integration.
-- **Loop closure** – Scan Context and M2DP place-recognition descriptors with `ScanContextDatabase` for efficient loop-closure candidate retrieval.
+- **Loop closure** – Scan Context and M2DP LiDAR place-recognition descriptors with `ScanContextDatabase` for efficient loop-closure candidate retrieval; plus `compute_image_descriptor` (HOG-like) and `ImageLoopClosureDatabase` for camera-based visual loop closure — all pure NumPy/SciPy.
 - **Pose graph** – pose graph data structure and Gauss-Newton optimisation back-end for graph-SLAM.
 - **Sliding-window smoother** – fixed-lag online SLAM smoother that bounds per-step cost to O(window_size³).
 - **Submap manager** – keyframe selection and submap division for large-scale long-duration SLAM.
@@ -109,12 +113,14 @@ Install optional extras to unlock additional integrations:
 | `rerun` | `rerun-sdk>=0.14` | rerun.io visualisation logging |
 | `mcap` | `mcap>=1.0` | `sbag_to_rosbag()` MCAP conversion |
 | `kiss_icp` | `kiss-icp>=1.0` | Upstream reference KISS-ICP implementation |
+| `opencv` | `opencv-python>=4.0` | Production-quality ORB/SIFT features via `cv2` |
 
 ```bash
 pip install ".[open3d]"    # Open3D support
 pip install ".[rerun]"     # rerun.io support
 pip install ".[mcap]"      # MCAP / ROS 2 bag conversion
 pip install ".[kiss_icp]"  # Upstream KISS-ICP reference implementation
+pip install ".[opencv]"    # OpenCV for ORB/SIFT feature detection
 ```
 
 ---
@@ -914,6 +920,116 @@ if pnp.success:
 
 ---
 
+### Feature Detection & Matching
+
+Pure NumPy/SciPy Harris corner detection, intensity-patch descriptors, and
+brute-force feature matching — enabling a complete visual odometry pipeline
+without OpenCV or any additional dependencies.
+
+```python
+from sensor_transposition.feature_detection import (
+    detect_harris_corners,
+    compute_patch_descriptor,
+    match_features,
+)
+from sensor_transposition.visual_odometry import (
+    estimate_essential_matrix,
+    recover_pose_from_essential,
+)
+import numpy as np
+
+# Camera intrinsics
+K = np.array([[718.856, 0, 607.193],
+              [0, 718.856, 185.216],
+              [0, 0, 1.0]])
+
+# 1. Detect Harris corners in both frames
+kp1 = detect_harris_corners(gray1, threshold=0.01, max_corners=500)
+kp2 = detect_harris_corners(gray2, threshold=0.01, max_corners=500)
+
+# 2. Compute normalised intensity-patch descriptors
+desc1 = compute_patch_descriptor(gray1, kp1, patch_size=11)
+desc2 = compute_patch_descriptor(gray2, kp2, patch_size=11)
+
+# 3. Match with Lowe's ratio test
+matches = match_features(desc1, desc2, ratio_threshold=0.75)
+pts1 = kp1[matches[:, 0], ::-1].astype(float)   # (row, col) → (u, v)
+pts2 = kp2[matches[:, 1], ::-1].astype(float)
+
+# 4. Estimate essential matrix and recover relative pose
+if len(pts1) >= 8:
+    result = estimate_essential_matrix(pts1, pts2, K)
+    E, mask = result.essential_matrix, result.inlier_mask
+    R, t = recover_pose_from_essential(E, pts1[mask], pts2[mask], K)
+    print("Rotation:\n", R)
+    print("Translation (unit):", t)
+```
+
+| Function | Description |
+|----------|-------------|
+| `detect_harris_corners(image, ...)` | Harris corner detection with NMS; returns `(M, 2)` ``(row, col)`` array |
+| `compute_patch_descriptor(image, keypoints, ...)` | Normalised flat intensity-patch descriptors |
+| `match_features(desc1, desc2, ratio_threshold=0.75)` | Brute-force L2 + Lowe's ratio test; returns `(K, 2)` match index array |
+
+For production-quality ORB or SIFT features, install the optional `opencv`
+extra and use `cv2` directly in your own code:
+
+```bash
+pip install ".[opencv]"
+```
+
+---
+
+### Stereo Camera
+
+Stereo rectification, dense block-matching disparity, and stereo
+triangulation for metric 3-D depth recovery.  Unlike monocular visual
+odometry (which recovers pose only up to a scale factor), stereo VO recovers
+the metric scale directly from the known baseline.
+
+```python
+from sensor_transposition.stereo import (
+    stereo_rectify,
+    compute_disparity_sgbm,
+    triangulate_stereo,
+)
+import numpy as np
+
+# Camera calibration (from stereo calibration procedure)
+K = np.array([[718.856, 0, 607.193],
+              [0, 718.856, 185.216],
+              [0, 0, 1.0]])
+baseline = 0.537   # metres (KITTI stereo baseline)
+R_stereo = np.eye(3)
+t_stereo = np.array([-baseline, 0.0, 0.0])
+
+# 1. Compute rectification transforms
+R1, R2, P1, P2 = stereo_rectify(K, (), K, (), R_stereo, t_stereo,
+                                  image_size=(375, 1242))
+
+# 2. (Apply R1/R2 with your preferred image remapping, e.g. cv2.remap)
+
+# 3. Compute dense disparity from the rectified stereo pair
+disp = compute_disparity_sgbm(img_left_rect, img_right_rect,
+                               block_size=11, num_disparities=64)
+
+# 4a. Recover 3-D point cloud from the disparity map
+pts3d = triangulate_stereo(K=K, baseline=baseline, disp=disp)
+print(f"Reconstructed {len(pts3d)} 3-D points")
+
+# 4b. Or use matched pixel pairs from sparse feature matching
+pts3d_sparse = triangulate_stereo(pts_left, pts_right, K=K, baseline=baseline)
+```
+
+| Function | Description |
+|----------|-------------|
+| `stereo_rectify(K1, D1, K2, D2, R, t, image_size)` | Bouguet rectification → `(R1, R2, P1, P2)` |
+| `compute_disparity_sgbm(img_left, img_right, ...)` | Block-matching (SAD) disparity map in pure NumPy |
+| `triangulate_stereo(pts_left, pts_right, K=K, baseline=b)` | Pixel pairs → metric XYZ |
+| `triangulate_stereo(K=K, baseline=b, disp=disp)` | Disparity map → metric point cloud |
+
+---
+
 ### Wheel Odometry
 
 Dead-reckoning pose estimation for differential-drive and Ackermann vehicles.
@@ -940,7 +1056,10 @@ print(result.x, result.y, result.theta)
 
 ### Loop Closure
 
-Place recognition using Scan Context and M2DP descriptors.
+Place recognition using Scan Context and M2DP LiDAR descriptors, plus a
+HOG-like image descriptor for visual loop closure.
+
+#### LiDAR loop closure (Scan Context / M2DP)
 
 ```python
 from sensor_transposition.loop_closure import (
@@ -966,6 +1085,39 @@ from sensor_transposition.loop_closure import m2dp_distance
 desc_a = compute_m2dp(cloud_a)
 desc_b = compute_m2dp(cloud_b)
 print("M2DP distance:", m2dp_distance(desc_a, desc_b))
+```
+
+#### Visual loop closure (camera images)
+
+For camera-heavy platforms or environments where the LiDAR loop-closure
+database is sparse, use the HOG-like image descriptor and
+`ImageLoopClosureDatabase`:
+
+```python
+from sensor_transposition.loop_closure import (
+    compute_image_descriptor,
+    image_descriptor_distance,
+    ImageLoopClosureDatabase,
+)
+
+# Standalone descriptor comparison
+desc_a = compute_image_descriptor(gray_frame_a, grid=(4, 4), bins=8)
+desc_b = compute_image_descriptor(gray_frame_b, grid=(4, 4), bins=8)
+dist = image_descriptor_distance(desc_a, desc_b)
+print(f"Visual similarity: {dist:.4f}  (0=identical, 1=maximally different)")
+
+# Incremental database with exclusion window (mirrors ScanContextDatabase API)
+db = ImageLoopClosureDatabase(grid=(4, 4), bins=8, exclusion_window=20)
+
+for frame_id, gray_img in enumerate(camera_frames):
+    desc = db.compute_descriptor(gray_img)
+    candidates = db.query(desc, top_k=1)
+    db.add(desc, frame_id=frame_id)
+
+    if candidates and candidates[0].distance < 0.20:
+        loop_from = candidates[0].match_frame_id
+        print(f"Visual loop closure: {frame_id} ↔ {loop_from}, "
+              f"d={candidates[0].distance:.3f}")
 ```
 
 ---

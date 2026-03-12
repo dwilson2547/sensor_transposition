@@ -79,7 +79,7 @@ Typical use-case
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Tuple
 
 import numpy as np
 
@@ -786,3 +786,350 @@ def _check_compatible(
             f"Descriptors have incompatible shapes: "
             f"({a.num_rings}, {a.num_sectors}) vs ({b.num_rings}, {b.num_sectors})."
         )
+
+
+# ===========================================================================
+# Visual Loop Closure
+# ===========================================================================
+# The functions and class below extend the loop-closure module to support
+# *camera-based* place recognition alongside the existing LiDAR descriptors.
+# All computations are pure NumPy; no additional dependencies are required.
+
+
+@dataclass
+class ImageDescriptor:
+    """A compact HOG-like image descriptor for visual loop closure.
+
+    Attributes:
+        vector: 1-D float array of length ``grid_rows × grid_cols × bins``.
+            The descriptor is L2-normalised so that cosine distance and
+            L2 distance are equivalent up to a constant scale.
+        grid_rows: Number of cell rows used when building the descriptor.
+        grid_cols: Number of cell columns used when building the descriptor.
+        bins: Number of gradient-orientation histogram bins per cell.
+    """
+
+    vector: np.ndarray
+    grid_rows: int
+    grid_cols: int
+    bins: int
+
+
+def compute_image_descriptor(
+    image: np.ndarray,
+    *,
+    grid: Tuple[int, int] = (4, 4),
+    bins: int = 8,
+) -> ImageDescriptor:
+    """Compute a compact HOG-like descriptor from a grayscale image.
+
+    The image is divided into a ``grid[0] × grid[1]`` regular grid of cells.
+    Within each cell a histogram of gradient orientations (unsigned, 0–π) is
+    computed using *bins* equally-spaced bins.  Bin magnitudes are
+    gradient-magnitude weighted.  All cell histograms are concatenated and
+    the resulting vector is L2-normalised.
+
+    The descriptor length is ``grid[0] × grid[1] × bins``.
+
+    Args:
+        image: Grayscale image as a 2-D NumPy array (H × W).  Floating-point
+            or integer pixel values are both accepted.
+        grid: ``(num_rows, num_cols)`` number of cells to divide the image
+            into.  Both values must be ≥ 1.  Default ``(4, 4)``.
+        bins: Number of orientation histogram bins per cell.  Must be ≥ 1.
+            Default ``8``.
+
+    Returns:
+        :class:`ImageDescriptor` with a normalised vector of length
+        ``grid[0] × grid[1] × bins``.
+
+    Raises:
+        ValueError: If *image* is not 2-D, *grid* values are < 1, or
+            *bins* < 1.
+
+    Example::
+
+        from sensor_transposition.loop_closure import compute_image_descriptor
+
+        desc_a = compute_image_descriptor(gray_frame_a)
+        desc_b = compute_image_descriptor(gray_frame_b)
+        dist = image_descriptor_distance(desc_a, desc_b)
+        print(f"Visual similarity distance: {dist:.4f}")
+    """
+    img = np.asarray(image, dtype=float)
+    if img.ndim != 2:
+        raise ValueError(
+            f"image must be a 2-D (grayscale) array, got shape {img.shape}."
+        )
+    grid_rows, grid_cols = grid
+    if grid_rows < 1 or grid_cols < 1:
+        raise ValueError(
+            f"grid values must be >= 1, got ({grid_rows}, {grid_cols})."
+        )
+    if bins < 1:
+        raise ValueError(f"bins must be >= 1, got {bins}.")
+
+    H, W = img.shape
+
+    # Compute image gradients using simple central differences.
+    # Pad image to handle borders.
+    padded = np.pad(img, 1, mode="edge")
+    gx = padded[1:-1, 2:] - padded[1:-1, :-2]   # horizontal gradient
+    gy = padded[2:, 1:-1] - padded[:-2, 1:-1]   # vertical gradient
+
+    magnitude = np.sqrt(gx * gx + gy * gy)
+    # Unsigned orientations in [0, π).
+    orientation = np.arctan2(np.abs(gy), gx) % np.pi
+
+    # Divide into grid cells and compute histograms.
+    descriptor_parts: list[np.ndarray] = []
+    for ri in range(grid_rows):
+        r_start = int(round(ri * H / grid_rows))
+        r_end = int(round((ri + 1) * H / grid_rows))
+        for ci in range(grid_cols):
+            c_start = int(round(ci * W / grid_cols))
+            c_end = int(round((ci + 1) * W / grid_cols))
+
+            cell_mag = magnitude[r_start:r_end, c_start:c_end].ravel()
+            cell_ori = orientation[r_start:r_end, c_start:c_end].ravel()
+
+            # Weighted histogram of orientations (unsigned).
+            hist, _ = np.histogram(
+                cell_ori,
+                bins=bins,
+                range=(0.0, np.pi),
+                weights=cell_mag,
+            )
+            descriptor_parts.append(hist.astype(float))
+
+    vector = np.concatenate(descriptor_parts)
+
+    # L2-normalise.
+    norm = np.linalg.norm(vector)
+    if norm > _ZERO_NORM_THRESHOLD:
+        vector = vector / norm
+
+    return ImageDescriptor(
+        vector=vector,
+        grid_rows=grid_rows,
+        grid_cols=grid_cols,
+        bins=bins,
+    )
+
+
+def image_descriptor_distance(
+    desc_a: ImageDescriptor,
+    desc_b: ImageDescriptor,
+) -> float:
+    """Compute the cosine distance between two :class:`ImageDescriptor` objects.
+
+    Args:
+        desc_a: First image descriptor.
+        desc_b: Second image descriptor.
+
+    Returns:
+        Cosine distance in ``[0, 1]`` — lower means more similar.
+
+    Raises:
+        ValueError: If the descriptors have incompatible parameters.
+    """
+    if (
+        desc_a.grid_rows != desc_b.grid_rows
+        or desc_a.grid_cols != desc_b.grid_cols
+        or desc_a.bins != desc_b.bins
+    ):
+        raise ValueError(
+            "ImageDescriptors have incompatible parameters: "
+            f"grid=({desc_a.grid_rows}, {desc_a.grid_cols}), bins={desc_a.bins} vs "
+            f"grid=({desc_b.grid_rows}, {desc_b.grid_cols}), bins={desc_b.bins}."
+        )
+    a = desc_a.vector
+    b = desc_b.vector
+    norm_a = np.linalg.norm(a)
+    norm_b = np.linalg.norm(b)
+    if norm_a < _ZERO_NORM_THRESHOLD and norm_b < _ZERO_NORM_THRESHOLD:
+        return 0.0
+    if norm_a < _ZERO_NORM_THRESHOLD or norm_b < _ZERO_NORM_THRESHOLD:
+        return 1.0
+    cos_sim = float(np.dot(a, b) / (norm_a * norm_b))
+    return float(1.0 - np.clip(cos_sim, -1.0, 1.0))
+
+
+class ImageLoopClosureDatabase:
+    """An incremental database of image descriptors for visual loop closure.
+
+    Mirrors the :class:`ScanContextDatabase` API (``add``, ``query``,
+    ``compute_descriptor``) but operates on :class:`ImageDescriptor` objects
+    computed from grayscale camera images.
+
+    Descriptors are compared using cosine distance (via
+    :func:`image_descriptor_distance`).  An exclusion window prevents matches
+    against recently added frames.
+
+    Args:
+        grid: ``(num_rows, num_cols)`` grid used when computing descriptors
+            (default ``(4, 4)``).
+        bins: Number of orientation histogram bins per cell (default ``8``).
+        exclusion_window: Minimum number of recent frames to skip when
+            searching for loop closures.  Default ``20``.
+    """
+
+    def __init__(
+        self,
+        *,
+        grid: Tuple[int, int] = (4, 4),
+        bins: int = 8,
+        exclusion_window: int = 20,
+    ) -> None:
+        grid_rows, grid_cols = grid
+        if grid_rows < 1 or grid_cols < 1:
+            raise ValueError(
+                f"grid values must be >= 1, got ({grid_rows}, {grid_cols})."
+            )
+        if bins < 1:
+            raise ValueError(f"bins must be >= 1, got {bins}.")
+        if exclusion_window < 0:
+            raise ValueError(
+                f"exclusion_window must be >= 0, got {exclusion_window}."
+            )
+
+        self.grid_rows = grid_rows
+        self.grid_cols = grid_cols
+        self.bins = bins
+        self.exclusion_window = exclusion_window
+
+        self._descriptors: List[ImageDescriptor] = []
+        self._frame_ids: List[int] = []
+        # Cached descriptor matrix for fast L2 pre-screening: (n, D).
+        self._vectors: np.ndarray = np.empty(
+            (0, grid_rows * grid_cols * bins), dtype=float
+        )
+
+    # ------------------------------------------------------------------
+    # Public methods
+    # ------------------------------------------------------------------
+
+    def compute_descriptor(self, image: np.ndarray) -> ImageDescriptor:
+        """Compute an :class:`ImageDescriptor` using this database's parameters.
+
+        Args:
+            image: Grayscale 2-D image array.
+
+        Returns:
+            :class:`ImageDescriptor` compatible with this database.
+        """
+        return compute_image_descriptor(
+            image,
+            grid=(self.grid_rows, self.grid_cols),
+            bins=self.bins,
+        )
+
+    def add(
+        self,
+        descriptor: ImageDescriptor,
+        *,
+        frame_id: int | None = None,
+    ) -> int:
+        """Add a descriptor to the database.
+
+        Args:
+            descriptor: An :class:`ImageDescriptor` computed with compatible
+                ``grid`` and ``bins`` parameters.
+            frame_id: Optional integer identifier for the keyframe.  If
+                ``None``, the current database length is used.
+
+        Returns:
+            The database index assigned to the newly added descriptor.
+
+        Raises:
+            ValueError: If *descriptor* has incompatible parameters.
+        """
+        self._check_descriptor_params(descriptor)
+        idx = len(self._descriptors)
+        if frame_id is None:
+            frame_id = idx
+        self._descriptors.append(descriptor)
+        self._frame_ids.append(frame_id)
+        row = descriptor.vector.reshape(1, -1)
+        self._vectors = np.vstack([self._vectors, row])
+        return idx
+
+    def query(
+        self,
+        descriptor: ImageDescriptor,
+        *,
+        top_k: int = 1,
+    ) -> List[LoopClosureCandidate]:
+        """Find the top-*k* loop closure candidates for a query descriptor.
+
+        Args:
+            descriptor: The query :class:`ImageDescriptor`.
+            top_k: Number of best matches to return.  Default ``1``.
+
+        Returns:
+            List of up to *top_k* :class:`LoopClosureCandidate` objects sorted
+            by ascending cosine distance.  An empty list is returned when no
+            eligible entries exist.
+
+        Raises:
+            ValueError: If *descriptor* has incompatible parameters or
+                *top_k* < 1.
+        """
+        self._check_descriptor_params(descriptor)
+        if top_k < 1:
+            raise ValueError(f"top_k must be >= 1, got {top_k}.")
+
+        n = len(self._descriptors)
+        eligible_end = n - self.exclusion_window
+        if eligible_end <= 0:
+            return []
+
+        q = descriptor.vector  # (D,)
+        q_norm = np.linalg.norm(q)
+
+        candidates: List[LoopClosureCandidate] = []
+        for db_idx in range(eligible_end):
+            v = self._vectors[db_idx]
+            v_norm = np.linalg.norm(v)
+            if q_norm < _ZERO_NORM_THRESHOLD or v_norm < _ZERO_NORM_THRESHOLD:
+                dist = 0.0 if (q_norm < _ZERO_NORM_THRESHOLD and v_norm < _ZERO_NORM_THRESHOLD) else 1.0
+            else:
+                cos_sim = float(np.dot(q, v) / (q_norm * v_norm))
+                dist = float(1.0 - np.clip(cos_sim, -1.0, 1.0))
+            candidates.append(
+                LoopClosureCandidate(
+                    match_frame_id=self._frame_ids[db_idx],
+                    distance=dist,
+                    yaw_shift_sectors=0,
+                    database_index=db_idx,
+                )
+            )
+
+        candidates.sort(key=lambda c: c.distance)
+        return candidates[:top_k]
+
+    def __len__(self) -> int:
+        """Return the number of descriptors currently stored."""
+        return len(self._descriptors)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _check_descriptor_params(self, descriptor: ImageDescriptor) -> None:
+        """Raise ``ValueError`` if descriptor parameters are incompatible."""
+        if descriptor.grid_rows != self.grid_rows:
+            raise ValueError(
+                f"Descriptor grid_rows={descriptor.grid_rows} does not match "
+                f"database grid_rows={self.grid_rows}."
+            )
+        if descriptor.grid_cols != self.grid_cols:
+            raise ValueError(
+                f"Descriptor grid_cols={descriptor.grid_cols} does not match "
+                f"database grid_cols={self.grid_cols}."
+            )
+        if descriptor.bins != self.bins:
+            raise ValueError(
+                f"Descriptor bins={descriptor.bins} does not match "
+                f"database bins={self.bins}."
+            )

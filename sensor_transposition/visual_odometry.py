@@ -27,29 +27,54 @@ dependencies are needed.
 
 Typical use-case
 ----------------
-* **Frame-to-frame ego-motion**: match feature keypoints between consecutive
-  frames with any descriptor matcher (e.g. ORB, SIFT, or your own) and
-  supply the matched pixel pairs to :func:`estimate_essential_matrix` and
-  :func:`recover_pose_from_essential`.
+* **Frame-to-frame ego-motion**: detect and match feature keypoints between
+  consecutive frames using :mod:`sensor_transposition.feature_detection`
+  (pure NumPy/SciPy, no external dependencies) or any external library
+  (ORB, SIFT, etc.) and supply the matched pixel pairs to
+  :func:`estimate_essential_matrix` and :func:`recover_pose_from_essential`.
 * **Map-based localisation**: use :func:`solve_pnp` to estimate the pose of a
   new frame given 3-D map-point observations.
 
-Example::
+Complete end-to-end example (no external dependencies)::
 
+    import numpy as np
+    from sensor_transposition.feature_detection import (
+        detect_harris_corners,
+        compute_patch_descriptor,
+        match_features,
+    )
     from sensor_transposition.visual_odometry import (
         estimate_essential_matrix,
         recover_pose_from_essential,
         solve_pnp,
     )
 
-    # 1. Estimate E from matched pixel pairs
+    # Camera intrinsic matrix
+    K = np.array([[718.856, 0, 607.193],
+                  [0, 718.856, 185.216],
+                  [0, 0, 1.0]])
+
+    # 1. Detect Harris corners
+    kp1 = detect_harris_corners(gray1, threshold=0.01, max_corners=500)
+    kp2 = detect_harris_corners(gray2, threshold=0.01, max_corners=500)
+
+    # 2. Compute patch descriptors and match (Lowe's ratio test)
+    desc1 = compute_patch_descriptor(gray1, kp1, patch_size=11)
+    desc2 = compute_patch_descriptor(gray2, kp2, patch_size=11)
+    matches = match_features(desc1, desc2, ratio_threshold=0.75)
+
+    # (row, col) → pixel (u, v) coordinate convention
+    pts1 = kp1[matches[:, 0], ::-1].astype(float)
+    pts2 = kp2[matches[:, 1], ::-1].astype(float)
+
+    # 3. Estimate E from matched pixel pairs
     result = estimate_essential_matrix(pts1, pts2, K)
     E, mask = result.essential_matrix, result.inlier_mask
 
-    # 2. Recover camera motion
+    # 4. Recover camera motion
     R, t = recover_pose_from_essential(E, pts1[mask], pts2[mask], K)
 
-    # 3. Estimate pose from 3-D / 2-D correspondences
+    # 5. Estimate pose from 3-D / 2-D correspondences (map-based localisation)
     pnp = solve_pnp(points_3d, pixels_2d, K)
     if pnp.success:
         print("Camera rotation:\\n", pnp.rotation)
