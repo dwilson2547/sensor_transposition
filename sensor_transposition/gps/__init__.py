@@ -25,6 +25,12 @@ from sensor_transposition.gps.fusion import (
     GpsFuser,
     hdop_to_noise,
 )
+from sensor_transposition.gps.rtcm import (
+    Rtcm1005,
+    RtcmMsm,
+    RtcmParser,
+    parse_rtcm_file,
+)
 
 __all__ = [
     "GgaFix",
@@ -42,4 +48,8 @@ __all__ = [
     "utm_zone_letter",
     "GpsFuser",
     "hdop_to_noise",
+    "Rtcm1005",
+    "RtcmMsm",
+    "RtcmParser",
+    "parse_rtcm_file",
 ]

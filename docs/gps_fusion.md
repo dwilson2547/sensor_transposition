@@ -207,6 +207,99 @@ for i, fix in enumerate(fixes_b):
 
 ---
 
+## GNSS Outage Handling
+
+During GNSS outages (tunnels, urban canyons, multi-storey car parks) the GPS
+receiver stops producing valid fixes.  If `fuse_into_ekf` is called with a
+stale fix, the EKF will incorporate outdated position information, degrading
+the state estimate.
+
+### Enabling outage detection
+
+Pass `max_fix_age_sec` and an optional `on_outage` callback when constructing
+`GpsFuser`:
+
+```python
+from sensor_transposition.gps.fusion import GpsFuser, hdop_to_noise
+from sensor_transposition.imu.ekf import ImuEkf, EkfState
+
+def handle_outage(age_sec: float) -> None:
+    """Called when a GPS update is skipped because the fix is stale."""
+    print(f"GNSS outage detected — last fix was {age_sec:.1f} s ago. "
+          f"Relying on IMU/wheel-odometry dead-reckoning.")
+
+fuser = GpsFuser(
+    ref_lat=51.5080,
+    ref_lon=-0.1281,
+    max_fix_age_sec=2.0,       # skip GPS updates older than 2 s
+    on_outage=handle_outage,   # called each time an update is skipped
+)
+```
+
+### Fusing with a timestamp
+
+Pass `current_timestamp` to `fuse_into_ekf` so the fuser can track fix age:
+
+```python
+ekf   = ImuEkf()
+state = EkfState()
+current_time = 0.0
+
+for t, fix, accel, gyro, dt in sensor_stream:
+    # IMU prediction (always runs)
+    state = ekf.predict(state, accel, gyro, dt)
+    current_time += dt
+
+    # GPS update — skipped automatically during outages
+    noise = hdop_to_noise(fix.hdop)
+    state = fuser.fuse_into_ekf(
+        ekf, state, fix, noise,
+        current_timestamp=current_time,
+    )
+```
+
+When `age > max_fix_age_sec`:
+
+1. `fuse_into_ekf` returns the **unchanged** state (EKF is not updated).
+2. `on_outage(age)` is called with the age in seconds (if provided).
+3. The EKF continues to propagate using IMU measurements alone.
+
+### Querying fix age manually
+
+Use `fix_age(current_timestamp)` to poll the staleness of the last fix:
+
+```python
+age = fuser.fix_age(current_time)   # None if no fix has been fused yet
+
+if age is not None and age > 5.0:
+    print("GPS fix is very stale — increase dead-reckoning covariance")
+```
+
+### Recommended pattern: fall back to LiDAR/wheel odometry
+
+```python
+from sensor_transposition.gps.fusion import GpsFuser, hdop_to_noise
+from sensor_transposition.imu.ekf import ImuEkf, EkfState
+
+_use_gps = True
+
+def on_outage(age_sec: float) -> None:
+    global _use_gps
+    _use_gps = False
+    print(f"GNSS outage ({age_sec:.1f} s) — switching to LiDAR odometry")
+
+fuser = GpsFuser(
+    ref_lat=51.5080, ref_lon=-0.1281,
+    max_fix_age_sec=1.0,
+    on_outage=on_outage,
+)
+
+# When a fresh fix arrives again, the fuser will resume updating the EKF
+# automatically — no manual re-enable needed.
+```
+
+---
+
 ## API Reference
 
 ### `hdop_to_noise(hdop, base_sigma_m=3.0, vertical_sigma_m=5.0)`
@@ -220,17 +313,20 @@ measurement noise covariance.
 | `base_sigma_m` | `3.0` | Horizontal σ in metres when HDOP = 1. |
 | `vertical_sigma_m` | `5.0` | Vertical (Up) σ in metres, constant. |
 
-### `GpsFuser(ref_lat, ref_lon, ref_alt=0.0)`
+### `GpsFuser(ref_lat, ref_lon, ref_alt=0.0, max_fix_age_sec=None, on_outage=None)`
 
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `fix_to_enu(fix)` | `(east, north, up)` | Convert a fix to ENU tuple (metres). |
 | `fix_to_enu_array(fix)` | `np.ndarray (3,)` | Same as above, as a NumPy array. |
-| `fuse_into_ekf(ekf, state, fix, noise)` | `EkfState` | Fuse via EKF position update. |
+| `fuse_into_ekf(ekf, state, fix, noise, current_timestamp=None)` | `EkfState` | Fuse via EKF position update; skips update if fix is stale. |
 | `fuse_into_sequence(seq, timestamp, fix)` | `FramePose` | Add/update frame in trajectory. |
+| `fix_age(current_timestamp)` | `float \| None` | Age of the most recent fused fix (s), or `None` if no fix yet. |
 
 | Property | Type | Description |
 |----------|------|-------------|
 | `ref_lat` | `float` | Latitude of ENU origin (degrees). |
 | `ref_lon` | `float` | Longitude of ENU origin (degrees). |
 | `ref_alt` | `float` | Altitude of ENU origin (metres). |
+| `max_fix_age_sec` | `float \| None` | Outage threshold in seconds (`None` = disabled). |
+| `last_fix_timestamp` | `float \| None` | Timestamp of the most recently fused fix. |
