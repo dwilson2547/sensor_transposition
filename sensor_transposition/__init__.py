@@ -42,6 +42,24 @@ from sensor_transposition.ground_plane import (
     ransac_ground_plane,
     normal_based_segment,
 )
+from sensor_transposition import feature_detection
+from sensor_transposition.feature_detection import (
+    detect_harris_corners,
+    compute_patch_descriptor,
+    match_features,
+)
+from sensor_transposition import stereo
+from sensor_transposition.stereo import (
+    stereo_rectify,
+    compute_disparity_sgbm,
+    triangulate_stereo,
+)
+from sensor_transposition.loop_closure import (
+    compute_image_descriptor,
+    image_descriptor_distance,
+    ImageDescriptor,
+    ImageLoopClosureDatabase,
+)
 from sensor_transposition import exceptions
 from sensor_transposition.exceptions import (
     SensorTranspositionError,
@@ -94,6 +112,18 @@ __all__ = [
     "height_threshold_segment",
     "ransac_ground_plane",
     "normal_based_segment",
+    "feature_detection",
+    "detect_harris_corners",
+    "compute_patch_descriptor",
+    "match_features",
+    "stereo",
+    "stereo_rectify",
+    "compute_disparity_sgbm",
+    "triangulate_stereo",
+    "compute_image_descriptor",
+    "image_descriptor_distance",
+    "ImageDescriptor",
+    "ImageLoopClosureDatabase",
     "exceptions",
     "SensorTranspositionError",
     "SensorNotFoundError",

@@ -158,3 +158,95 @@ For typical outdoor ground-vehicle SLAM, **Scan Context** combined with
 complementary or standalone descriptor for environments where the ground-plane
 assumption does not hold or a single compact descriptor is needed for downstream
 machine-learning pipelines.
+
+---
+
+## Visual Loop Closure
+
+In camera-heavy platforms (e.g. autonomous cars with surround cameras but
+sparse or no LiDAR) or as a fallback when the LiDAR loop-closure database
+cannot find a match, a visual loop closure detector is needed.
+
+`sensor_transposition` provides a pure NumPy/SciPy HOG-like image descriptor
+and an `ImageLoopClosureDatabase` that mirrors the `ScanContextDatabase` API.
+
+---
+
+### `compute_image_descriptor`
+
+Divides the image into a `grid_rows × grid_cols` regular grid of cells.
+Within each cell a histogram of gradient orientations (unsigned, 0–π) is
+computed using `bins` equally-spaced bins, weighted by gradient magnitude
+(HOG-style).  All cell histograms are concatenated and L2-normalised.
+
+**Descriptor length:** `grid_rows × grid_cols × bins`
+
+**Typical parameters:**
+
+| Parameter | Default | Notes |
+|-----------|---------|-------|
+| `grid` | `(4, 4)` | Number of cells (rows, cols) |
+| `bins` | `8` | Orientation histogram bins per cell |
+
+```python
+from sensor_transposition.loop_closure import (
+    compute_image_descriptor,
+    image_descriptor_distance,
+)
+
+desc_a = compute_image_descriptor(gray_frame_a, grid=(4, 4), bins=8)
+desc_b = compute_image_descriptor(gray_frame_b, grid=(4, 4), bins=8)
+
+dist = image_descriptor_distance(desc_a, desc_b)
+print(f"Visual distance: {dist:.4f}")  # 0 = identical, 1 = maximally different
+```
+
+---
+
+### `ImageLoopClosureDatabase`
+
+An incremental database of `ImageDescriptor` objects with the same
+`add` / `query` / `compute_descriptor` API as `ScanContextDatabase`.
+
+A two-stage search is **not** required (descriptors are compact vectors),
+so `query` computes cosine distance directly against all eligible entries.
+An **exclusion window** (default 20) suppresses near-consecutive matches.
+
+```python
+from sensor_transposition.loop_closure import ImageLoopClosureDatabase
+
+db = ImageLoopClosureDatabase(grid=(4, 4), bins=8, exclusion_window=20)
+
+for frame_id, gray_img in enumerate(camera_frames):
+    desc = db.compute_descriptor(gray_img)   # uses db.grid / db.bins
+    candidates = db.query(desc, top_k=1)
+    db.add(desc, frame_id=frame_id)
+
+    if candidates and candidates[0].distance < 0.20:
+        loop_frame = candidates[0].match_frame_id
+        print(f"Visual loop closure: {frame_id} ↔ {loop_frame} "
+              f"(dist={candidates[0].distance:.3f})")
+```
+
+After a visual loop closure candidate is found, pass the two frames to a
+visual odometry back-end (e.g.
+`sensor_transposition.visual_odometry.estimate_essential_matrix`) for
+geometric verification and to obtain the relative transform for a
+pose-graph edge.
+
+---
+
+## Choosing Between LiDAR and Visual Descriptors
+
+| Criterion | Scan Context / M2DP | `compute_image_descriptor` |
+|-----------|--------------------|-----------------------------|
+| Sensor | LiDAR | Camera (grayscale) |
+| Designed for | Ground-vehicle / general 3-D LiDAR | Camera-heavy or LiDAR-sparse platforms |
+| Rotation invariance | Column-shift (Scan Context) / implicit (M2DP) | Grid is axis-aligned; not rotation-invariant |
+| Descriptor length | `num_rings × num_sectors` / `L + P` | `grid_rows × grid_cols × bins` |
+| Dependencies | Pure NumPy/SciPy | Pure NumPy/SciPy |
+
+For typical outdoor ground-vehicle SLAM with LiDAR, **Scan Context** is the
+recommended primary loop-closure detector.  Use `compute_image_descriptor` /
+`ImageLoopClosureDatabase` as a complementary or fallback visual detector on
+platforms where camera coverage is richer than LiDAR coverage.

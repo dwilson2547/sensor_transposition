@@ -23,6 +23,7 @@ open3d = ["open3d>=0.17"]
 rerun = ["rerun-sdk>=0.14"]
 mcap = ["mcap>=1.0"]
 kiss_icp = ["kiss-icp>=1.0"]
+opencv = ["opencv-python>=4.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]

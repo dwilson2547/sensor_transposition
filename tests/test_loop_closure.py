@@ -602,3 +602,228 @@ class TestM2dpDistance:
         assert desc.num_elevation == 8
         assert desc.num_rings == 4
         assert desc.num_sectors == 16
+
+
+# ===========================================================================
+# Visual Loop Closure Tests
+# ===========================================================================
+
+
+from sensor_transposition.loop_closure import (
+    ImageDescriptor,
+    ImageLoopClosureDatabase,
+    compute_image_descriptor,
+    image_descriptor_distance,
+)
+
+
+def _make_gray_image(H: int = 32, W: int = 32, seed: int = 0) -> np.ndarray:
+    """Return a random (H, W) grayscale image as float array."""
+    return np.random.default_rng(seed).uniform(0, 255, (H, W))
+
+
+def _make_checkerboard_gray(size: int = 32, block: int = 4) -> np.ndarray:
+    img = np.zeros((size, size), dtype=float)
+    for r in range(size):
+        for c in range(size):
+            if ((r // block) + (c // block)) % 2 == 0:
+                img[r, c] = 255.0
+    return img
+
+
+# ---------------------------------------------------------------------------
+# compute_image_descriptor
+# ---------------------------------------------------------------------------
+
+
+class TestComputeImageDescriptor:
+    def test_returns_descriptor(self):
+        img = _make_gray_image()
+        desc = compute_image_descriptor(img)
+        assert isinstance(desc, ImageDescriptor)
+
+    def test_vector_length(self):
+        img = _make_gray_image(64, 64)
+        desc = compute_image_descriptor(img, grid=(4, 4), bins=8)
+        assert desc.vector.shape == (4 * 4 * 8,)
+
+    def test_custom_grid_and_bins(self):
+        img = _make_gray_image(64, 64)
+        desc = compute_image_descriptor(img, grid=(2, 3), bins=6)
+        assert desc.vector.shape == (2 * 3 * 6,)
+        assert desc.grid_rows == 2
+        assert desc.grid_cols == 3
+        assert desc.bins == 6
+
+    def test_unit_norm(self):
+        """Descriptor vector should be L2-normalised."""
+        img = _make_checkerboard_gray()
+        desc = compute_image_descriptor(img)
+        norm = np.linalg.norm(desc.vector)
+        assert abs(norm - 1.0) < 1e-6
+
+    def test_different_images_different_descriptors(self):
+        img1 = _make_gray_image(32, 32, seed=0)
+        img2 = _make_gray_image(32, 32, seed=1)
+        d1 = compute_image_descriptor(img1)
+        d2 = compute_image_descriptor(img2)
+        assert not np.allclose(d1.vector, d2.vector)
+
+    def test_uniform_image_zero_vector(self):
+        """A uniform image has no gradients → descriptor may be zero."""
+        img = np.ones((32, 32), dtype=float) * 128.0
+        desc = compute_image_descriptor(img)
+        # L2 norm is either 0 (empty descriptor) or 1 (normalised),
+        # but values should all be the same (all-zero gradient → zero hist).
+        assert desc.vector.shape == (4 * 4 * 8,)
+
+    def test_invalid_image_3d(self):
+        with pytest.raises(ValueError, match="2-D"):
+            compute_image_descriptor(np.ones((10, 10, 3)))
+
+    def test_invalid_grid_zero(self):
+        with pytest.raises(ValueError, match="grid"):
+            compute_image_descriptor(np.ones((10, 10)), grid=(0, 4))
+
+    def test_invalid_bins_zero(self):
+        with pytest.raises(ValueError, match="bins"):
+            compute_image_descriptor(np.ones((10, 10)), bins=0)
+
+
+# ---------------------------------------------------------------------------
+# image_descriptor_distance
+# ---------------------------------------------------------------------------
+
+
+class TestImageDescriptorDistance:
+    def _make_desc(self, seed: int = 0) -> ImageDescriptor:
+        img = _make_gray_image(seed=seed)
+        return compute_image_descriptor(img)
+
+    def test_self_distance_is_zero(self):
+        desc = self._make_desc(0)
+        dist = image_descriptor_distance(desc, desc)
+        assert abs(dist) < 1e-10
+
+    def test_distance_in_range(self):
+        desc_a = self._make_desc(0)
+        desc_b = self._make_desc(1)
+        dist = image_descriptor_distance(desc_a, desc_b)
+        assert 0.0 <= dist <= 1.0
+
+    def test_symmetry(self):
+        desc_a = self._make_desc(0)
+        desc_b = self._make_desc(1)
+        assert image_descriptor_distance(desc_a, desc_b) == pytest.approx(
+            image_descriptor_distance(desc_b, desc_a), abs=1e-10
+        )
+
+    def test_incompatible_descriptors(self):
+        desc_a = compute_image_descriptor(np.ones((32, 32)), grid=(4, 4), bins=8)
+        desc_b = compute_image_descriptor(np.ones((32, 32)), grid=(2, 2), bins=8)
+        with pytest.raises(ValueError, match="incompatible"):
+            image_descriptor_distance(desc_a, desc_b)
+
+
+# ---------------------------------------------------------------------------
+# ImageLoopClosureDatabase
+# ---------------------------------------------------------------------------
+
+
+class TestImageLoopClosureDatabase:
+    def _make_db(self, **kwargs) -> ImageLoopClosureDatabase:
+        return ImageLoopClosureDatabase(grid=(4, 4), bins=8, **kwargs)
+
+    def _make_desc(self, seed: int = 0) -> ImageDescriptor:
+        img = _make_gray_image(seed=seed)
+        return compute_image_descriptor(img, grid=(4, 4), bins=8)
+
+    def test_initial_length_zero(self):
+        db = self._make_db()
+        assert len(db) == 0
+
+    def test_add_increments_length(self):
+        db = self._make_db()
+        db.add(self._make_desc(0))
+        db.add(self._make_desc(1))
+        assert len(db) == 2
+
+    def test_add_returns_index(self):
+        db = self._make_db()
+        idx0 = db.add(self._make_desc(0))
+        idx1 = db.add(self._make_desc(1))
+        assert idx0 == 0
+        assert idx1 == 1
+
+    def test_compute_descriptor_uses_db_params(self):
+        db = self._make_db()
+        img = _make_gray_image()
+        desc = db.compute_descriptor(img)
+        assert desc.grid_rows == db.grid_rows
+        assert desc.grid_cols == db.grid_cols
+        assert desc.bins == db.bins
+
+    def test_query_empty_db_returns_empty(self):
+        db = self._make_db(exclusion_window=0)
+        candidates = db.query(self._make_desc(0))
+        assert candidates == []
+
+    def test_query_within_exclusion_window_returns_empty(self):
+        db = self._make_db(exclusion_window=5)
+        for i in range(4):
+            db.add(self._make_desc(i))
+        candidates = db.query(self._make_desc(0))
+        assert candidates == []
+
+    def test_query_returns_candidates(self):
+        db = self._make_db(exclusion_window=0)
+        for i in range(5):
+            db.add(self._make_desc(i))
+        desc_query = self._make_desc(0)
+        candidates = db.query(desc_query, top_k=2)
+        assert len(candidates) <= 2
+        for c in candidates:
+            assert isinstance(c, LoopClosureCandidate)
+            assert 0.0 <= c.distance <= 1.0
+
+    def test_self_match_gives_low_distance(self):
+        """Querying with a stored descriptor should give near-zero distance."""
+        db = self._make_db(exclusion_window=0)
+        desc = self._make_desc(0)
+        db.add(desc)
+        candidates = db.query(desc, top_k=1)
+        assert len(candidates) == 1
+        assert candidates[0].distance < 0.01
+
+    def test_invalid_grid_zero(self):
+        with pytest.raises(ValueError, match="grid"):
+            ImageLoopClosureDatabase(grid=(0, 4))
+
+    def test_invalid_bins_zero(self):
+        with pytest.raises(ValueError, match="bins"):
+            ImageLoopClosureDatabase(bins=0)
+
+    def test_invalid_exclusion_window(self):
+        with pytest.raises(ValueError, match="exclusion_window"):
+            ImageLoopClosureDatabase(exclusion_window=-1)
+
+    def test_add_incompatible_descriptor_raises(self):
+        db = self._make_db()
+        desc_wrong = compute_image_descriptor(np.ones((32, 32)), grid=(2, 2), bins=8)
+        with pytest.raises(ValueError, match="grid_rows"):
+            db.add(desc_wrong)
+
+    def test_top_k_limits_results(self):
+        db = self._make_db(exclusion_window=0)
+        for i in range(10):
+            db.add(self._make_desc(i))
+        candidates = db.query(self._make_desc(0), top_k=3)
+        assert len(candidates) <= 3
+
+    def test_candidates_sorted_by_distance(self):
+        db = self._make_db(exclusion_window=0)
+        for i in range(10):
+            db.add(self._make_desc(i))
+        candidates = db.query(self._make_desc(0), top_k=5)
+        dists = [c.distance for c in candidates]
+        assert dists == sorted(dists)

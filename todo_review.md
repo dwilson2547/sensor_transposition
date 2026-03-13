@@ -119,14 +119,14 @@ integrate an external library (OpenCV, kornia, etc.) before they can get any
 output.  The gap is especially large because the rest of the SLAM pipeline
 (ICP, EKF, pose graph) is fully self-contained in pure NumPy/SciPy.
 
-- [ ] Add a `feature_detection.py` module with a minimal, pure-NumPy/SciPy
+- [x] Add a `feature_detection.py` module with a minimal, pure-NumPy/SciPy
   Harris corner detector (`detect_harris_corners`) and a simple descriptor
   (intensity patches or simplified BRIEF).
-- [ ] Add `match_features(desc1, desc2, ratio_threshold=0.75)` using brute-
+- [x] Add `match_features(desc1, desc2, ratio_threshold=0.75)` using brute-
   force L2 distance with Lowe's ratio test to filter outlier matches.
-- [ ] Update the `visual_odometry.py` docstring and README to show a complete
+- [x] Update the `visual_odometry.py` docstring and README to show a complete
   example that goes from two grayscale images all the way to a relative pose.
-- [ ] (Optional / Medium) Add an `opencv` optional extra to `pyproject.toml`
+- [x] (Optional / Medium) Add an `opencv` optional extra to `pyproject.toml`
   so users who want production-quality ORB/SIFT features can `pip install
   ".[opencv]"` and use `cv2` in their own code.
 
@@ -140,13 +140,13 @@ heavy platforms (e.g. autonomous cars with surround cameras but no LiDAR) or
 in systems where the LiDAR loop-closure database is sparse, a visual loop
 closure fallback is needed.
 
-- [ ] Add a `compute_image_descriptor(image, grid=(4,4), bins=8)` function to
+- [x] Add a `compute_image_descriptor(image, grid=(4,4), bins=8)` function to
   `loop_closure.py` that computes a compact HOG-like bag-of-visual-words
   descriptor from a grayscale image — pure NumPy, no external dependencies.
-- [ ] Add an `ImageLoopClosureDatabase` class mirroring the
+- [x] Add an `ImageLoopClosureDatabase` class mirroring the
   `ScanContextDatabase` API (`add`, `query`, `compute_descriptor`) for image
   descriptors.
-- [ ] Document in `docs/loop_closure.md` and the README.
+- [x] Document in `docs/loop_closure.md` and the README.
 
 ---
 
@@ -158,14 +158,13 @@ computation, direct metric depth from stereo baseline) are absent.  Monocular
 VO produces pose estimates only up to a scale factor; stereo VO recovers the
 metric scale directly from the baseline.
 
-- [ ] Add `stereo_rectify(K1, D1, K2, D2, R, t, image_size)` to
-  `camera_intrinsics.py` or a new `stereo.py`.
-- [ ] Add `compute_disparity_sgbm(img_left, img_right, block_size=11,
-  num_disparities=64)` (pure NumPy semi-global matching approximation or thin
-  wrapper around the OpenCV optional extra).
-- [ ] Add `triangulate_stereo(pts_left, pts_right, K, baseline)` that converts
+- [x] Add `stereo_rectify(K1, D1, K2, D2, R, t, image_size)` to
+  a new `stereo.py`.
+- [x] Add `compute_disparity_sgbm(img_left, img_right, block_size=11,
+  num_disparities=64)` (pure NumPy block-matching / SAD implementation).
+- [x] Add `triangulate_stereo(pts_left, pts_right, K, baseline)` that converts
   stereo pixel matches to metric 3-D points.
-- [ ] Add a **Stereo Camera** section to the README.
+- [x] Add a **Stereo Camera** section to the README.
 
 ---
 
@@ -343,7 +342,7 @@ processed.
       `lidar/scan_matching.py`
 - [x] Create `ground_plane.py` module with height-threshold, RANSAC, and
       normal-based segmentation functions (currently only in docs)
-- [ ] Add visual feature detection / matching to support a complete visual
+- [x] Add visual feature detection / matching to support a complete visual
       odometry pipeline without external dependencies
 - [ ] Add map-based localization mode to `SLAMSession` (load existing map,
       localize without modifying it)
@@ -355,9 +354,9 @@ processed.
       (pure NumPy/SciPy; reference original `TODO.md`)
 - [ ] Add `ImuFactor` edge type and wire `ImuPreintegrator` output into the
       pose graph for tightly-coupled IMU optimisation
-- [ ] Add visual loop closure support (`compute_image_descriptor`,
+- [x] Add visual loop closure support (`compute_image_descriptor`,
       `ImageLoopClosureDatabase`) to `loop_closure.py`
-- [ ] Add stereo camera utilities (rectification, disparity, triangulation)
+- [x] Add stereo camera utilities (rectification, disparity, triangulation)
 - [ ] Add multi-session SLAM: `SLAMSession.save()` / `load()` and
       `merge_sessions()` utility
 - [ ] Add RTK GPS setup guide (`docs/rtk_gps_setup.md`) and RTCM 3.x parser
