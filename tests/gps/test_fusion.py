@@ -315,3 +315,141 @@ class TestIntegration:
         for j in range(1, 5):
             dn = poses[j].translation[1] - poses[j - 1].translation[1]
             assert dn == pytest.approx(10.0, rel=1e-3)
+
+
+# ===========================================================================
+# GpsFuser – GNSS outage detection (max_fix_age_sec / on_outage / fix_age)
+# ===========================================================================
+
+
+class TestGnssOutage:
+    def test_fix_age_none_before_any_fix(self):
+        """fix_age() should return None when no fix has been fused yet."""
+        fuser = GpsFuser(ref_lat=_LAT, ref_lon=_LON, max_fix_age_sec=1.0)
+        assert fuser.fix_age(100.0) is None
+
+    def test_fix_age_after_fused_fix(self):
+        """fix_age() should return the elapsed time since the last fused fix."""
+        fuser = GpsFuser(ref_lat=_LAT, ref_lon=_LON, max_fix_age_sec=5.0)
+        ekf = ImuEkf()
+        state = EkfState()
+        fix = _make_gga()
+        noise = hdop_to_noise(1.0)
+        # Fuse fix at t=10.0
+        fuser.fuse_into_ekf(ekf, state, fix, noise, current_timestamp=10.0)
+        # At t=13.5 the age should be 3.5 s
+        assert fuser.fix_age(13.5) == pytest.approx(3.5)
+
+    def test_last_fix_timestamp_updated(self):
+        """_last_fix_timestamp should be updated after a successful fuse."""
+        fuser = GpsFuser(ref_lat=_LAT, ref_lon=_LON)
+        ekf = ImuEkf()
+        state = EkfState()
+        fix = _make_gga()
+        noise = hdop_to_noise(1.0)
+        fuser.fuse_into_ekf(ekf, state, fix, noise, current_timestamp=42.0)
+        assert fuser.last_fix_timestamp == pytest.approx(42.0)
+
+    def test_no_outage_when_fix_fresh(self):
+        """Should perform EKF update when fix age is within threshold."""
+        fuser = GpsFuser(
+            ref_lat=_LAT, ref_lon=_LON,
+            max_fix_age_sec=5.0,
+        )
+        ekf = ImuEkf()
+        state = EkfState(position=np.array([100.0, 200.0, 50.0]))
+        fix = _make_gga()
+        noise = hdop_to_noise(1.0)
+        # Fuse first fix at t=0 to seed _last_fix_timestamp
+        fuser.fuse_into_ekf(ekf, state, fix, noise, current_timestamp=0.0)
+        # Fuse second fix at t=3.0 (age = 3.0 s < 5.0 s threshold)
+        new_state = fuser.fuse_into_ekf(ekf, state, fix, noise, current_timestamp=3.0)
+        # Position should have moved toward (0, 0, 0)
+        old_err = np.linalg.norm(state.position)
+        new_err = np.linalg.norm(new_state.position)
+        assert new_err < old_err
+
+    def test_outage_skips_ekf_update(self):
+        """When fix is stale, fuse_into_ekf should return the unchanged state."""
+        fuser = GpsFuser(
+            ref_lat=_LAT, ref_lon=_LON,
+            max_fix_age_sec=1.0,
+        )
+        ekf = ImuEkf()
+        initial_pos = np.array([100.0, 200.0, 50.0])
+        state = EkfState(position=initial_pos.copy())
+        fix = _make_gga()
+        noise = hdop_to_noise(1.0)
+        # Fuse first fix at t=0
+        fuser.fuse_into_ekf(ekf, state, fix, noise, current_timestamp=0.0)
+        # Now attempt to fuse at t=5.0 (age = 5.0 s > 1.0 s threshold)
+        returned = fuser.fuse_into_ekf(ekf, state, fix, noise, current_timestamp=5.0)
+        # The returned state should be the same object (unchanged)
+        assert returned is state
+
+    def test_on_outage_callback_called(self):
+        """on_outage should be called with the fix age when update is skipped."""
+        ages_received: list[float] = []
+
+        fuser = GpsFuser(
+            ref_lat=_LAT, ref_lon=_LON,
+            max_fix_age_sec=1.0,
+            on_outage=ages_received.append,
+        )
+        ekf = ImuEkf()
+        state = EkfState()
+        fix = _make_gga()
+        noise = hdop_to_noise(1.0)
+        # Seed the timestamp at t=0
+        fuser.fuse_into_ekf(ekf, state, fix, noise, current_timestamp=0.0)
+        # Trigger outage at t=3.0 (age = 3.0 s > 1.0 s)
+        fuser.fuse_into_ekf(ekf, state, fix, noise, current_timestamp=3.0)
+        assert len(ages_received) == 1
+        assert ages_received[0] == pytest.approx(3.0)
+
+    def test_on_outage_not_called_when_fresh(self):
+        """on_outage should NOT be called when the fix is within threshold."""
+        called: list[bool] = []
+        fuser = GpsFuser(
+            ref_lat=_LAT, ref_lon=_LON,
+            max_fix_age_sec=5.0,
+            on_outage=lambda age: called.append(True),
+        )
+        ekf = ImuEkf()
+        state = EkfState()
+        fix = _make_gga()
+        noise = hdop_to_noise(1.0)
+        fuser.fuse_into_ekf(ekf, state, fix, noise, current_timestamp=0.0)
+        fuser.fuse_into_ekf(ekf, state, fix, noise, current_timestamp=2.0)
+        assert called == []
+
+    def test_outage_detection_disabled_without_max_fix_age(self):
+        """Without max_fix_age_sec, no outage check should occur."""
+        fuser = GpsFuser(ref_lat=_LAT, ref_lon=_LON)  # no max_fix_age_sec
+        ekf = ImuEkf()
+        state = EkfState(position=np.array([100.0, 0.0, 0.0]))
+        fix = _make_gga()
+        noise = hdop_to_noise(1.0)
+        # Should always update regardless of timestamp
+        new_state = fuser.fuse_into_ekf(
+            ekf, state, fix, noise, current_timestamp=1_000_000.0,
+        )
+        assert new_state is not state  # a new state was produced
+
+    def test_no_timestamp_arg_still_works(self):
+        """fuse_into_ekf with no current_timestamp should work as before."""
+        fuser = GpsFuser(ref_lat=_LAT, ref_lon=_LON)
+        ekf = ImuEkf()
+        state = EkfState()
+        fix = _make_gga()
+        noise = hdop_to_noise(1.0)
+        new_state = fuser.fuse_into_ekf(ekf, state, fix, noise)
+        assert isinstance(new_state, EkfState)
+
+    def test_max_fix_age_property(self):
+        fuser = GpsFuser(ref_lat=0.0, ref_lon=0.0, max_fix_age_sec=2.5)
+        assert fuser.max_fix_age_sec == pytest.approx(2.5)
+
+    def test_max_fix_age_none_by_default(self):
+        fuser = GpsFuser(ref_lat=0.0, ref_lon=0.0)
+        assert fuser.max_fix_age_sec is None

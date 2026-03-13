@@ -210,14 +210,14 @@ coordinate-frame conversion, but there is:
 - No `GpsFuser` integration with an RTK-grade position covariance (centimetre
   vs. metre level).
 
-- [ ] Add `docs/rtk_gps_setup.md` covering RTK base-station requirements,
+- [x] Add `docs/rtk_gps_setup.md` covering RTK base-station requirements,
   NTRIP client configuration (using common tools such as `str2str` or
   `rtklib`), and how to set the resulting centimetre-level sigma in
   `hdop_to_noise`.
-- [ ] Add an `rtcm.py` module (or a section of `gps/nmea.py`) that can parse
+- [x] Add an `rtcm.py` module (or a section of `gps/nmea.py`) that can parse
   RTCM 3.x Message Type 1005 (base-station antenna position) and MSM4/MSM7
   (raw observations), returning structured records.
-- [ ] Update the README GPS section with an RTK sub-section linking to the new
+- [x] Update the README GPS section with an RTK sub-section linking to the new
   guide.
 
 ---
@@ -230,12 +230,12 @@ consecutive fixes.  During GNSS outages (tunnels, urban canyons) the EKF drifts
 on IMU alone with no indication that GPS data is absent, and no automatic
 switch to a wheel-odometry or LiDAR-odometry only mode.
 
-- [ ] Add a `max_fix_age_sec` parameter to `GpsFuser` (default `1.0`).  If the
+- [x] Add a `max_fix_age_sec` parameter to `GpsFuser` (default `1.0`).  If the
   time since the last valid fix exceeds this threshold, `fuse_into_ekf` should
   skip the update and optionally call a user-supplied `on_outage` callback.
-- [ ] Add a `GpsFuser.fix_age(current_timestamp)` property so callers can check
+- [x] Add a `GpsFuser.fix_age(current_timestamp)` property so callers can check
   how stale the most recent fix is before deciding whether to trust it.
-- [ ] Document the recommended pattern (fall back to wheel odometry / LiDAR
+- [x] Document the recommended pattern (fall back to wheel odometry / LiDAR
   odometry) in `docs/gps_fusion.md`.
 
 ---
@@ -359,8 +359,8 @@ processed.
 - [x] Add stereo camera utilities (rectification, disparity, triangulation)
 - [ ] Add multi-session SLAM: `SLAMSession.save()` / `load()` and
       `merge_sessions()` utility
-- [ ] Add RTK GPS setup guide (`docs/rtk_gps_setup.md`) and RTCM 3.x parser
-- [ ] Add GNSS outage handling to `GpsFuser` (`max_fix_age_sec`, `on_outage`
+- [x] Add RTK GPS setup guide (`docs/rtk_gps_setup.md`) and RTCM 3.x parser
+- [x] Add GNSS outage handling to `GpsFuser` (`max_fix_age_sec`, `on_outage`
       callback, `fix_age` property)
 - [ ] Add NDT (Normal Distributions Transform) scan matcher as an alternative
       to ICP

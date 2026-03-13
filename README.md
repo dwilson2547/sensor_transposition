@@ -24,6 +24,9 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
   - [GPS / GNSS](#gps--gnss)
   - [GPS Coordinate-Frame Converter](#gps-coordinate-frame-converter)
   - [GPS Fusion](#gps-fusion)
+  - [RTK GPS & NTRIP](#rtk-gps--ntrip)
+  - [RTCM 3.x Parser](#rtcm-3x-parser)
+  - [GNSS Outage Handling](#gnss-outage-handling)
   - [IMU](#imu)
   - [IMU Error-State EKF](#imu-error-state-ekf)
   - [IMU Pre-integration](#imu-pre-integration)
@@ -65,7 +68,8 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
 - **Ground plane segmentation** – three complementary methods for separating ground points from obstacles: height-threshold (fast, flat terrain), RANSAC plane fitting (robust to outliers and unknown sensor height), and normal-based filtering (handles uneven/hilly terrain via per-point PCA normals); all pure NumPy/SciPy.
 - **LiDAR motion distortion correction** – IMU-based scan deskewing that corrects per-point timestamps across a spinning LiDAR sweep.
 - **GPS / GNSS** – NMEA 0183 parser supporting GGA and RMC sentence types, plus a coordinate-frame converter for ECEF ↔ ENU and geodetic ↔ UTM conversions.
-- **GPS fusion** – `GpsFuser` converts GPS fixes to local ENU and integrates them into an `ImuEkf` state or a `FramePoseSequence`; `hdop_to_noise` converts HDOP to a 3×3 position noise covariance.
+- **GPS fusion** – `GpsFuser` converts GPS fixes to local ENU and integrates them into an `ImuEkf` state or a `FramePoseSequence`; `hdop_to_noise` converts HDOP to a 3×3 position noise covariance; GNSS outage detection via `max_fix_age_sec` and an `on_outage` callback automatically skips stale fixes and falls back to IMU/wheel-odometry dead-reckoning.
+- **RTK GPS** – RTCM 3.x correction-stream parser supporting MT1005 (base-station ECEF position) and MSM4/MSM7 pseudorange/carrier-phase messages for GPS, GLONASS, Galileo, and BeiDou; pure Python, no additional dependencies.  See `docs/rtk_gps_setup.md` for NTRIP client setup and centimetre-level sigma configuration.
 - **IMU** – binary parser for 32-byte (accel + gyro) and 48-byte (accel + gyro + quaternion) records.
 - **IMU Error-State EKF** – 15-state error-state extended Kalman filter fusing IMU, GPS, and pose observations.
 - **IMU pre-integration** – accumulates raw IMU measurements between keyframes into compact (ΔR, Δv, Δp) increments for tight IMU–LiDAR coupling.
@@ -773,6 +777,115 @@ quaternions = seq.quaternions  # (N, 4) float64 array of [w, x, y, z]
 seq.to_csv("trajectory.csv")
 seq2 = FramePoseSequence.from_csv("trajectory.csv")
 ```
+
+---
+
+### RTK GPS & NTRIP
+
+Real-Time Kinematic (RTK) GPS uses carrier-phase corrections from a reference
+station to achieve **1–5 cm** horizontal accuracy — from the **2–5 m**
+accuracy of standard GPS.  See **[`docs/rtk_gps_setup.md`](docs/rtk_gps_setup.md)**
+for a full setup guide covering:
+
+- RTK base-station hardware requirements
+- NTRIP caster connection (using `str2str` from RTKLIB, or a pure-Python
+  socket client)
+- Setting the correct `base_sigma_m` in `hdop_to_noise` for RTK-fixed
+  (≈ 2 cm) vs RTK-float (≈ 30 cm) solutions
+
+```python
+from sensor_transposition.gps.fusion import hdop_to_noise
+
+# Standard GPS:  σ_H ≈ 3 m × HDOP
+noise_standard = hdop_to_noise(fix.hdop)
+
+# RTK fixed solution: σ_H ≈ 2 cm × HDOP
+noise_rtk = hdop_to_noise(fix.hdop, base_sigma_m=0.02, vertical_sigma_m=0.05)
+```
+
+---
+
+### RTCM 3.x Parser
+
+Parse RTCM 3.x binary correction streams — e.g. from an NTRIP caster,
+UHF radio, or serial port:
+
+```python
+from sensor_transposition.gps.rtcm import parse_rtcm_file, Rtcm1005, RtcmMsm
+
+# Parse from a file
+messages = parse_rtcm_file("corrections.rtcm3")
+
+for msg in messages:
+    if isinstance(msg, Rtcm1005):
+        # MT1005: base-station antenna reference-point position in ECEF
+        print(f"Base ARP: X={msg.x_m:.4f} m  Y={msg.y_m:.4f} m  Z={msg.z_m:.4f} m")
+    elif isinstance(msg, RtcmMsm):
+        # MSM4 / MSM7: pseudorange & carrier-phase observations
+        print(f"MSM{msg.msm_type} {msg.constellation}  "
+              f"epoch={msg.epoch_ms} ms  "
+              f"sats=0x{msg.satellite_mask:016x}  "
+              f"n_pr={len(msg.pseudoranges_m)}")
+
+# Stream from a binary socket or serial port
+import io
+from sensor_transposition.gps.rtcm import RtcmParser
+
+with open("stream.rtcm3", "rb") as fh:
+    for msg in RtcmParser(fh).messages():
+        ...
+```
+
+**Supported message types:**
+
+| Message | Description |
+|---------|-------------|
+| MT1005 | Stationary reference station ECEF ARP position |
+| MT1074 / 1077 | GPS MSM4 / MSM7 observations |
+| MT1084 / 1087 | GLONASS MSM4 / MSM7 observations |
+| MT1094 / 1097 | Galileo MSM4 / MSM7 observations |
+| MT1124 / 1127 | BeiDou MSM4 / MSM7 observations |
+
+---
+
+### GNSS Outage Handling
+
+Configure `GpsFuser` with a `max_fix_age_sec` threshold and an optional
+`on_outage` callback to detect GNSS outages and automatically skip EKF
+updates when fixes are stale:
+
+```python
+from sensor_transposition.gps.fusion import GpsFuser, hdop_to_noise
+from sensor_transposition.imu.ekf import ImuEkf, EkfState
+
+def on_outage(age_sec: float) -> None:
+    print(f"GNSS outage — last fix {age_sec:.1f} s ago, "
+          f"switching to LiDAR/wheel odometry")
+
+fuser = GpsFuser(
+    ref_lat=51.5080, ref_lon=-0.1281,
+    max_fix_age_sec=2.0,      # skip updates when fix is > 2 s old
+    on_outage=on_outage,
+)
+
+ekf   = ImuEkf()
+state = EkfState()
+t = 0.0
+
+for fix, accel, gyro, dt in sensor_stream:
+    state = ekf.predict(state, accel, gyro, dt)
+    t += dt
+    noise = hdop_to_noise(fix.hdop)
+    # Pass current_timestamp so the fuser can track fix age
+    state = fuser.fuse_into_ekf(ekf, state, fix, noise, current_timestamp=t)
+
+# Query fix age at any time:
+age = fuser.fix_age(t)   # None if no fix has been fused yet
+```
+
+When `age > max_fix_age_sec` the EKF update is skipped and `on_outage` is
+called.  When a fresh fix eventually arrives, fusion resumes automatically.
+See `docs/gps_fusion.md` for a detailed treatment.
 
 ---
 
