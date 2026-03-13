@@ -44,6 +44,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
   - [Bag Recorder / Player](#bag-recorder--player)
   - [Camera–LiDAR Extrinsic Calibration](#cameralidar-extrinsic-calibration)
   - [SLAM Session (Pipeline Orchestration)](#slam-session-pipeline-orchestration)
+- [Localization Against a Pre-Built Map](#localization-against-a-pre-built-map)
 - [Error Handling](#error-handling)
 - [Configuration Example](#configuration-example)
 - [Quick-Start: End-to-End SLAM Pipeline](#quick-start-end-to-end-slam-pipeline)
@@ -1504,6 +1505,65 @@ with BagReader("session.sbag") as bag:
 All internal components are accessible as properties for advanced use:
 `session.pose_graph`, `session.loop_db`, `session.trajectory`,
 `session.point_cloud_map`.
+
+---
+
+## Localization Against a Pre-Built Map
+
+:class:`SLAMSession` supports a *localization-only* mode where a previously
+built map is loaded from a `.pcd` or `.ply` file and each incoming LiDAR scan
+is matched against it via ICP.  In this mode the map is never modified; pose-
+graph construction and loop-closure detection are skipped.  The resulting ego
+poses are accumulated in :attr:`~SLAMSession.trajectory`.
+
+### Loading a map and running localization
+
+```python
+from sensor_transposition.rosbag import BagReader
+from sensor_transposition.slam_session import SLAMSession
+
+# Load a previously saved PCD map to activate localization-only mode.
+session = SLAMSession(icp_max_iterations=30)
+session.load_map("map.pcd")          # also works with .ply
+
+with BagReader("live.sbag") as bag:
+    session.run(bag, lidar_topic="/lidar/points")
+
+# Trajectory contains ego poses in the pre-built map frame.
+session.trajectory.to_csv("localization_trajectory.csv")
+```
+
+### LocalizationSession convenience subclass
+
+:class:`LocalizationSession` combines the ``load_map`` call with the
+constructor so you never forget to activate localization mode:
+
+```python
+from sensor_transposition.rosbag import BagReader
+from sensor_transposition.slam_session import LocalizationSession
+
+with BagReader("live.sbag") as bag:
+    session = LocalizationSession("map.pcd", icp_max_iterations=30)
+    session.run(bag, lidar_topic="/lidar/points")
+
+session.trajectory.to_csv("localization_trajectory.csv")
+```
+
+### Workflow summary
+
+1. **Build** a map with a `SLAMSession` mapping run and save it:
+
+   ```python
+   session.optimize()
+   session.point_cloud_map.voxel_downsample(voxel_size=0.10)
+   session.point_cloud_map.save_pcd("map.pcd")
+   ```
+
+2. **Localize** against the saved map on subsequent runs using
+   `LocalizationSession` (or `SLAMSession.load_map`).
+
+The `SLAMSession.optimize()` method is a no-op in localization-only mode
+because no pose graph is built.
 
 ---
 

@@ -184,14 +184,14 @@ Neither `SLAMSession` nor any other module supports this workflow:
 - Running ICP or NDT to match each incoming scan against the fixed map.
 - Returning a stream of ego-poses without adding nodes to the pose graph.
 
-- [ ] Add a `SLAMSession.load_map(path)` method that loads a PCD/PLY file into
+- [x] Add a `SLAMSession.load_map(path)` method that loads a PCD/PLY file into
   `_point_cloud_map` and sets a `_localization_only` flag.
-- [ ] When `_localization_only=True`, `SLAMSession.run()` should skip pose
+- [x] When `_localization_only=True`, `SLAMSession.run()` should skip pose
   graph construction and instead match each scan directly against the loaded
   map using `icp_align`, accumulating poses into `_trajectory` only.
-- [ ] Add a `LocalizationSession` convenience subclass (or factory function)
+- [x] Add a `LocalizationSession` convenience subclass (or factory function)
   that wraps this workflow with a cleaner API.
-- [ ] Document in the README under a new **Localization Against a Pre-Built
+- [x] Document in the README under a new **Localization Against a Pre-Built
   Map** section.
 
 ---
@@ -344,7 +344,7 @@ processed.
       normal-based segmentation functions (currently only in docs)
 - [x] Add visual feature detection / matching to support a complete visual
       odometry pipeline without external dependencies
-- [ ] Add map-based localization mode to `SLAMSession` (load existing map,
+- [x] Add map-based localization mode to `SLAMSession` (load existing map,
       localize without modifying it)
 - [x] Implement scan-to-local-submap odometry to reduce frame-to-frame drift in
       `SLAMSession`
