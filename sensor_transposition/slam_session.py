@@ -67,6 +67,31 @@ odometry drift before it enters the pose graph::
         session = SLAMSession()
         session.run(bag, use_local_map=True, local_map_size=10,
                     local_map_voxel_size=0.2)
+
+Localization against a pre-built map
+-------------------------------------
+Call :meth:`~SLAMSession.load_map` before :meth:`~SLAMSession.run` to switch
+the session into *localization-only* mode.  In this mode each incoming scan is
+matched against the fixed pre-built map via ICP and the resulting pose is
+appended to :attr:`~SLAMSession.trajectory`, but the map is never modified and
+no pose-graph nodes or loop-closure edges are added::
+
+    session = SLAMSession()
+    session.load_map("map.pcd")          # activates localization-only mode
+
+    with BagReader("live.sbag") as bag:
+        session.run(bag, lidar_topic="/lidar/points")
+
+    # Trajectory contains ego poses in the pre-built map frame.
+    session.trajectory.to_csv("localization_trajectory.csv")
+
+The convenience subclass :class:`LocalizationSession` wraps this workflow::
+
+    with BagReader("live.sbag") as bag:
+        session = LocalizationSession("map.pcd")
+        session.run(bag)
+
+    session.trajectory.to_csv("localization_trajectory.csv")
 """
 
 from __future__ import annotations
@@ -284,6 +309,7 @@ class SLAMSession:
         # Internal state.
         self._scans: List[np.ndarray] = []          # raw scans in sensor frame
         self._opt_result = None                     # last optimize_pose_graph result
+        self._localization_only: bool = False       # set by load_map()
 
     # ------------------------------------------------------------------
     # Properties — expose internal components for advanced use
@@ -308,6 +334,54 @@ class SLAMSession:
     def point_cloud_map(self) -> PointCloudMap:
         """The accumulated :class:`~sensor_transposition.point_cloud_map.PointCloudMap`."""
         return self._point_cloud_map
+
+    @property
+    def localization_only(self) -> bool:
+        """``True`` after :meth:`load_map` has been called; ``False`` by default."""
+        return self._localization_only
+
+    # ------------------------------------------------------------------
+    # Map loading (localization-only mode)
+    # ------------------------------------------------------------------
+
+    def load_map(self, path: str) -> None:
+        """Load a pre-built point-cloud map and switch to localization-only mode.
+
+        After calling this method, :meth:`run` will match each incoming LiDAR
+        scan against the fixed loaded map using ICP and accumulate the resulting
+        pose into :attr:`trajectory`.  The map is never modified; pose-graph
+        construction and loop-closure detection are skipped.
+
+        Args:
+            path: Path to a ``.pcd`` or ``.ply`` map file previously saved by
+                :meth:`~sensor_transposition.point_cloud_map.PointCloudMap.save_pcd`
+                or
+                :meth:`~sensor_transposition.point_cloud_map.PointCloudMap.save_ply`.
+
+        Raises:
+            ValueError: If the file extension is not ``.pcd`` or ``.ply``.
+            RuntimeError: If the file cannot be parsed by
+                :class:`~sensor_transposition.point_cloud_map.PointCloudMap`.
+
+        Example::
+
+            session = SLAMSession()
+            session.load_map("map.pcd")        # activates localization mode
+            with BagReader("live.sbag") as bag:
+                session.run(bag)
+            session.trajectory.to_csv("localization_trajectory.csv")
+        """
+        path_lower = path.lower()
+        if path_lower.endswith(".pcd"):
+            self._point_cloud_map = PointCloudMap.from_pcd(path)
+        elif path_lower.endswith(".ply"):
+            self._point_cloud_map = PointCloudMap.from_ply(path)
+        else:
+            raise ValueError(
+                f"Unsupported map file format: {path!r}.  "
+                "Expected a .pcd or .ply file."
+            )
+        self._localization_only = True
 
     # ------------------------------------------------------------------
     # Callback registration
@@ -372,12 +446,17 @@ class SLAMSession:
                 rather than only the immediately preceding scan.  This
                 reduces frame-to-frame odometry drift by providing more
                 constraints to ICP simultaneously.  Default ``False``.
+                Ignored when the session is in localization-only mode (see
+                :meth:`load_map`).
             local_map_size: Number of most-recent keyframes retained in the
                 local submap when ``use_local_map=True`` (default ``10``).
             local_map_voxel_size: Voxel edge length (metres) used to
                 downsample each keyframe before adding it to the local map
                 (default ``0.1``).
         """
+        if self._localization_only:
+            self._run_localization(bag, lidar_topic, xyz_key)
+            return
         pose_translation = np.zeros(3)
         pose_rotation = np.eye(3)  # 3×3 rotation matrix, updated each frame
 
@@ -508,3 +587,116 @@ class SLAMSession:
             T = np.eye(4)
             T[:3, 3] = world_t
             self._point_cloud_map.add_scan(scan, T)
+
+    # ------------------------------------------------------------------
+    # Localization-only run loop
+    # ------------------------------------------------------------------
+
+    def _run_localization(
+        self,
+        bag: BagReader,
+        lidar_topic: str,
+        xyz_key: str,
+    ) -> None:
+        """Replay *bag* in localization-only mode.
+
+        Each LiDAR scan is matched against the fixed pre-built map stored in
+        :attr:`point_cloud_map` via ICP.  The resulting ego pose (in the
+        pre-built map frame) is appended to :attr:`trajectory`.  The map is
+        never modified; pose-graph construction, loop-closure detection, and
+        map accumulation are all skipped.
+
+        Args:
+            bag: An open :class:`~sensor_transposition.rosbag.BagReader`.
+            lidar_topic: LiDAR topic name (same semantics as in :meth:`run`).
+            xyz_key: Key inside each LiDAR message payload that holds the
+                ``(N, 3)`` point array.
+        """
+        map_cloud = self._point_cloud_map.get_points()
+        if map_cloud.shape[0] == 0:
+            raise RuntimeError(
+                "The loaded map is empty.  Call load_map() with a "
+                "non-empty .pcd or .ply file before running in "
+                "localization-only mode."
+            )
+
+        for msg in bag.read_messages():
+            # Forward every message to user callbacks first.
+            for cb in self._callbacks.get(msg.topic, []):
+                cb(msg)
+
+            if msg.topic != lidar_topic:
+                continue
+
+            scan = np.asarray(msg.data[xyz_key], dtype=float)
+
+            # ICP against the fixed pre-built map.  The returned transform
+            # maps the sensor frame directly into the world (map) frame, so
+            # the result is the absolute pose — no incremental composition
+            # is needed.
+            kwargs: Dict = {"max_iterations": self._icp_max_iterations}
+            if self._icp_max_distance is not None:
+                kwargs["max_distance"] = self._icp_max_distance
+            result = icp_align(scan, map_cloud, **kwargs)
+
+            pose_rotation = result.transform[:3, :3]
+            pose_translation = result.transform[:3, 3]
+
+            # Record pose only — map and pose graph are not modified.
+            # Scans are not stored in localization mode because the raw
+            # scan data is not needed for pose-graph rebuilding.
+            self._trajectory.add_pose(
+                FramePose(
+                    timestamp=msg.timestamp,
+                    translation=pose_translation.copy(),
+                    rotation=_rotation_to_quaternion(pose_rotation),
+                )
+            )
+
+
+# ---------------------------------------------------------------------------
+# LocalizationSession
+# ---------------------------------------------------------------------------
+
+
+class LocalizationSession(SLAMSession):
+    """Convenience subclass for localization against a pre-built map.
+
+    Loads a PCD or PLY map file at construction and immediately activates
+    *localization-only* mode.  Calling :meth:`run` then matches each incoming
+    LiDAR scan against the fixed map via ICP and accumulates the ego poses in
+    :attr:`~SLAMSession.trajectory` — the map is never modified.
+
+    This is equivalent to::
+
+        session = SLAMSession(...)
+        session.load_map(map_path)
+
+    but wraps both steps in a single constructor call for convenience.
+
+    Args:
+        map_path: Path to a ``.pcd`` or ``.ply`` map file.
+        **kwargs: Additional keyword arguments forwarded to
+            :class:`SLAMSession` (e.g. ``icp_max_iterations``,
+            ``icp_max_distance``).
+
+    Example::
+
+        from sensor_transposition.rosbag import BagReader
+        from sensor_transposition.slam_session import LocalizationSession
+
+        with BagReader("live.sbag") as bag:
+            session = LocalizationSession("map.pcd", icp_max_iterations=30)
+            session.run(bag, lidar_topic="/lidar/points")
+
+        # Trajectory contains ego poses in the pre-built map frame.
+        session.trajectory.to_csv("localization_trajectory.csv")
+
+    Note:
+        :meth:`optimize` is a no-op in localization-only mode because no
+        pose graph is built.
+    """
+
+    def __init__(self, map_path: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.load_map(map_path)
