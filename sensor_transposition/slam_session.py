@@ -68,6 +68,31 @@ odometry drift before it enters the pose graph::
         session.run(bag, use_local_map=True, local_map_size=10,
                     local_map_voxel_size=0.2)
 
+Tightly-coupled IMU integration
+--------------------------------
+Pass ``imu_topic`` to :meth:`run` to accumulate IMU measurements between
+consecutive LiDAR keyframes and add an :class:`~sensor_transposition.pose_graph.ImuFactor`
+edge to the pose graph for each inter-keyframe window.  Each factor encodes
+the pre-integrated (ΔR, Δv, Δp) increment as an additional 6-DOF relative-pose
+constraint alongside the ICP odometry edge, providing tighter coupling between
+IMU and LiDAR in the pose-graph back-end::
+
+    with BagReader("session.sbag") as bag:
+        session = SLAMSession()
+        session.run(
+            bag,
+            lidar_topic="/lidar/points",
+            imu_topic="/imu/data",
+        )
+
+    session.optimize()
+
+IMU messages are expected to carry ``"accel"`` (``[ax, ay, az]`` in m/s²) and
+``"gyro"`` (``[ωx, ωy, ωz]`` in rad/s) keys in their payload dict.  Use the
+*imu_accel_key* and *imu_gyro_key* arguments to :meth:`run` if different key
+names are needed.  A factor is only added when at least two IMU samples arrive
+between consecutive LiDAR keyframes.
+
 Localization against a pre-built map
 -------------------------------------
 Call :meth:`~SLAMSession.load_map` before :meth:`~SLAMSession.run` to switch
@@ -101,6 +126,7 @@ from typing import Callable, Dict, List, Optional, Union
 import numpy as np
 
 from sensor_transposition.frame_pose import FramePose, FramePoseSequence
+from sensor_transposition.imu.preintegration import ImuPreintegrator
 from sensor_transposition.lidar.scan_matching import icp_align
 from sensor_transposition.loop_closure import ScanContextDatabase, compute_scan_context
 from sensor_transposition.point_cloud_map import PointCloudMap
@@ -426,6 +452,10 @@ class SLAMSession:
         use_local_map: bool = False,
         local_map_size: int = 10,
         local_map_voxel_size: float = 0.1,
+        imu_topic: Optional[str] = None,
+        imu_accel_key: str = "accel",
+        imu_gyro_key: str = "gyro",
+        imu_information: float = 10.0,
     ) -> None:
         """Replay *bag* and process every LiDAR frame.
 
@@ -453,6 +483,27 @@ class SLAMSession:
             local_map_voxel_size: Voxel edge length (metres) used to
                 downsample each keyframe before adding it to the local map
                 (default ``0.1``).
+            imu_topic: Optional topic name that carries IMU messages.  When
+                set, IMU readings arriving between consecutive LiDAR keyframes
+                are buffered and integrated via
+                :class:`~sensor_transposition.imu.preintegration.ImuPreintegrator`
+                to produce an
+                :class:`~sensor_transposition.pose_graph.ImuFactor` edge in
+                the pose graph alongside the ICP odometry edge.  Each IMU
+                message payload is expected to contain *imu_accel_key*
+                (``[ax, ay, az]`` m/s²) and *imu_gyro_key* (``[ωx, ωy, ωz]``
+                rad/s) arrays.  ``None`` disables IMU integration (default).
+                Ignored when the session is in localization-only mode.
+            imu_accel_key: Key in the IMU message payload dict for the
+                accelerometer reading.  Defaults to ``"accel"``.
+            imu_gyro_key: Key in the IMU message payload dict for the
+                gyroscope reading.  Defaults to ``"gyro"``.
+            imu_information: Scalar multiplier for the 6×6 identity
+                information matrix assigned to each
+                :class:`~sensor_transposition.pose_graph.ImuFactor`
+                (default ``10.0``).  Lower than the ICP default of 100 to
+                reflect the higher positional uncertainty of IMU-only
+                dead-reckoning between keyframes.
         """
         if self._localization_only:
             self._run_localization(bag, lidar_topic, xyz_key)
@@ -466,10 +517,20 @@ class SLAMSession:
             else None
         )
 
+        # IMU buffering state: (timestamp, accel, gyro) triples accumulated
+        # between consecutive LiDAR keyframes.
+        _imu_buf: List[tuple] = []
+
         for msg in bag.read_messages():
             # Forward every message to user callbacks first.
             for cb in self._callbacks.get(msg.topic, []):
                 cb(msg)
+
+            # Buffer IMU readings for tight IMU–LiDAR coupling.
+            if imu_topic and msg.topic == imu_topic:
+                accel = np.asarray(msg.data[imu_accel_key], dtype=float)
+                gyro = np.asarray(msg.data[imu_gyro_key], dtype=float)
+                _imu_buf.append((msg.timestamp, accel, gyro))
 
             if msg.topic != lidar_topic:
                 continue
@@ -520,6 +581,26 @@ class SLAMSession:
                     transform=result.transform,
                     information=np.eye(6) * (100.0 if result.converged else 1.0),
                 )
+
+                # Add IMU factor if enough samples were buffered.
+                if imu_topic and len(_imu_buf) >= 2:
+                    ts_arr = np.array([t for t, _, _ in _imu_buf])
+                    accel_arr = np.vstack([a for _, a, _ in _imu_buf])
+                    gyro_arr = np.vstack([g for _, _, g in _imu_buf])
+                    preint = ImuPreintegrator().integrate(ts_arr, accel_arr, gyro_arr)
+                    self._pose_graph.add_imu_factor(
+                        from_id=frame_id - 1,
+                        to_id=frame_id,
+                        preint_result=preint,
+                        information=np.eye(6) * imu_information,
+                    )
+
+                # Carry the last IMU sample forward as the anchor of the next
+                # window.  Its original timestamp is intentionally kept so that
+                # ImuPreintegrator computes the correct Δt to the first new
+                # sample in the following gap, ensuring seamless continuity of
+                # the integration chain across keyframe boundaries.
+                _imu_buf = [_imu_buf[-1]] if _imu_buf else []
 
                 # Update local map with the new scan.
                 if local_map is not None:

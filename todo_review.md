@@ -254,16 +254,16 @@ Without proper IMU factors, the pose graph back-end ignores IMU measurements
 entirely during optimisation, giving up the tightly-coupled accuracy that
 pre-integration was designed to provide.
 
-- [ ] Define an `ImuFactor` dataclass in `pose_graph.py` (or a new
+- [x] Define an `ImuFactor` dataclass in `pose_graph.py` (or a new
   `imu_factor.py`) that stores a pre-integration result and the two keyframe
   IDs it connects.
-- [ ] Add `PoseGraph.add_imu_factor(from_id, to_id, preint_result)` that
+- [x] Add `PoseGraph.add_imu_factor(from_id, to_id, preint_result)` that
   converts the pre-integrated (ΔR, Δv, Δp) into the 6-DOF error formulation
   used by the existing Gauss-Newton optimiser.
-- [ ] Update `SLAMSession.run()` to accumulate IMU messages (via
+- [x] Update `SLAMSession.run()` to accumulate IMU messages (via
   `ImuPreintegrator`) between LiDAR keyframes and add `ImuFactor` edges to the
   pose graph.
-- [ ] Add unit tests for the `ImuFactor` to `tests/test_pose_graph.py`.
+- [x] Add unit tests for the `ImuFactor` to `tests/test_pose_graph.py`.
 
 ---
 
@@ -352,7 +352,7 @@ processed.
 ### Medium Priority
 - [x] Implement KISS-ICP adaptive-threshold odometry
       (pure NumPy/SciPy; reference original `TODO.md`)
-- [ ] Add `ImuFactor` edge type and wire `ImuPreintegrator` output into the
+- [x] Add `ImuFactor` edge type and wire `ImuPreintegrator` output into the
       pose graph for tightly-coupled IMU optimisation
 - [x] Add visual loop closure support (`compute_image_descriptor`,
       `ImageLoopClosureDatabase`) to `loop_closure.py`

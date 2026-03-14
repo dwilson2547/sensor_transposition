@@ -339,3 +339,123 @@ class TestLocalizationSession:
     def test_unsupported_map_raises_at_construction(self):
         with pytest.raises(ValueError, match="Unsupported"):
             LocalizationSession("map.bin")
+
+
+# ---------------------------------------------------------------------------
+# SLAMSession.run with IMU integration
+# ---------------------------------------------------------------------------
+
+
+def _write_bag_with_scans_and_imu(path: str, scans, imu_readings_per_gap: int = 3) -> None:
+    """Write a .sbag file interleaving /lidar/points and /imu/data messages.
+
+    Each LiDAR frame at integer timestamp i is preceded by
+    *imu_readings_per_gap* IMU messages evenly spaced in [i-1, i].
+    """
+    with BagWriter(path) as bag:
+        for i, scan in enumerate(scans):
+            # Write IMU messages between frames.
+            if i > 0:
+                for k in range(imu_readings_per_gap):
+                    ts = float(i - 1) + (k + 1) / (imu_readings_per_gap + 1)
+                    bag.write(
+                        "/imu/data",
+                        ts,
+                        {
+                            "accel": [0.0, 0.0, 0.0],
+                            "gyro": [0.0, 0.0, 0.0],
+                        },
+                    )
+            bag.write("/lidar/points", float(i), {"xyz": scan.tolist()})
+
+
+class TestSLAMSessionImuIntegration:
+    def _setup(self, n_scans: int = 4, imu_per_gap: int = 3):
+        scans = [_random_cloud(50, seed=i) for i in range(n_scans)]
+        bag_fd, bag_path = tempfile.mkstemp(suffix=".sbag")
+        os.close(bag_fd)
+        _write_bag_with_scans_and_imu(bag_path, scans, imu_per_gap)
+        return bag_path, n_scans
+
+    def test_imu_factors_added_to_pose_graph(self):
+        """With imu_topic set, an ImuFactor should be added for each non-first keyframe."""
+        bag_path, n_scans = self._setup(n_scans=4, imu_per_gap=3)
+        try:
+            session = SLAMSession()
+            with BagReader(bag_path) as bag:
+                session.run(bag, lidar_topic="/lidar/points",
+                            imu_topic="/imu/data")
+            # Expect (n_scans - 1) IMU factors (one per inter-keyframe gap).
+            assert len(session.pose_graph.imu_factors) == n_scans - 1
+        finally:
+            os.unlink(bag_path)
+
+    def test_imu_factors_connect_consecutive_keyframes(self):
+        """Each ImuFactor must connect consecutive keyframe IDs."""
+        bag_path, n_scans = self._setup(n_scans=3, imu_per_gap=3)
+        try:
+            session = SLAMSession()
+            with BagReader(bag_path) as bag:
+                session.run(bag, lidar_topic="/lidar/points",
+                            imu_topic="/imu/data")
+            factors = session.pose_graph.imu_factors
+            for k, factor in enumerate(factors):
+                assert factor.from_id == k
+                assert factor.to_id == k + 1
+        finally:
+            os.unlink(bag_path)
+
+    def test_no_imu_factors_without_imu_topic(self):
+        """Without imu_topic, the pose graph must contain no ImuFactors."""
+        bag_path, _ = self._setup()
+        try:
+            session = SLAMSession()
+            with BagReader(bag_path) as bag:
+                session.run(bag, lidar_topic="/lidar/points")
+            assert len(session.pose_graph.imu_factors) == 0
+        finally:
+            os.unlink(bag_path)
+
+    def test_trajectory_length_unchanged_with_imu(self):
+        """IMU integration must not affect the trajectory length."""
+        bag_path, n_scans = self._setup()
+        try:
+            session = SLAMSession()
+            with BagReader(bag_path) as bag:
+                session.run(bag, lidar_topic="/lidar/points",
+                            imu_topic="/imu/data")
+            assert len(session.trajectory) == n_scans
+        finally:
+            os.unlink(bag_path)
+
+    def test_no_imu_factor_when_too_few_imu_samples(self):
+        """If no IMU samples arrive between keyframes, no ImuFactor is added."""
+        scans = [_random_cloud(50, seed=i) for i in range(3)]
+        bag_fd, bag_path = tempfile.mkstemp(suffix=".sbag")
+        os.close(bag_fd)
+        # Write bags with no IMU messages at all.
+        with BagWriter(bag_path) as bag:
+            for i, scan in enumerate(scans):
+                bag.write("/lidar/points", float(i), {"xyz": scan.tolist()})
+        try:
+            session = SLAMSession()
+            with BagReader(bag_path) as bag:
+                session.run(bag, lidar_topic="/lidar/points",
+                            imu_topic="/imu/data")
+            assert len(session.pose_graph.imu_factors) == 0
+        finally:
+            os.unlink(bag_path)
+
+    def test_imu_information_parameter_used(self):
+        """The *imu_information* scalar is forwarded to the ImuFactor information matrix."""
+        bag_path, _ = self._setup(n_scans=3, imu_per_gap=3)
+        try:
+            session = SLAMSession()
+            with BagReader(bag_path) as bag:
+                session.run(bag, lidar_topic="/lidar/points",
+                            imu_topic="/imu/data",
+                            imu_information=25.0)
+            for factor in session.pose_graph.imu_factors:
+                np.testing.assert_allclose(factor.information, np.eye(6) * 25.0)
+        finally:
+            os.unlink(bag_path)

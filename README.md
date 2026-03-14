@@ -80,7 +80,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
 - **Stereo camera** – stereo rectification (Bouguet algorithm), dense block-matching disparity (pure NumPy SAD), and stereo triangulation for metric 3-D depth recovery; recovers absolute scale unavailable in monocular VO.
 - **Wheel odometry** – differential-drive and Ackermann (bicycle-model) dead-reckoning with midpoint integration.
 - **Loop closure** – Scan Context and M2DP LiDAR place-recognition descriptors with `ScanContextDatabase` for efficient loop-closure candidate retrieval; plus `compute_image_descriptor` (HOG-like) and `ImageLoopClosureDatabase` for camera-based visual loop closure — all pure NumPy/SciPy.
-- **Pose graph** – pose graph data structure and Gauss-Newton optimisation back-end for graph-SLAM.
+- **Pose graph** – pose graph data structure and Gauss-Newton optimisation back-end for graph-SLAM; supports standard 6-DOF odometry and loop-closure edges plus :class:`ImuFactor` edges that wrap IMU pre-integration results for tightly-coupled IMU–LiDAR optimisation.
 - **Sliding-window smoother** – fixed-lag online SLAM smoother that bounds per-step cost to O(window_size³).
 - **Submap manager** – keyframe selection and submap division for large-scale long-duration SLAM.
 - **Occupancy grid** – 2-D probabilistic occupancy grid with log-odds ray-casting; exports to ROS `nav_msgs/OccupancyGrid` int8 format.
@@ -88,7 +88,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
 - **Point-cloud map** – accumulated coloured point-cloud map with voxel-grid downsampling and PCD / PLY I/O.
 - **Visualisation** – BEV rendering, trajectory overlay, LiDAR-on-image overlay, Open3D and RViz export helpers.
 - **Bag recorder / player** – lightweight multi-topic binary bag format (`.sbag`) with streaming write and indexed playback; no external dependencies.  `sbag_to_rosbag()` converts to MCAP for use with `ros2 bag` (requires `pip install ".[mcap]"`).
-- **SLAM session** – `SLAMSession` orchestration class that wires ICP odometry, Scan Context loop closure, pose-graph optimisation, and point-cloud map accumulation into a single object with sensible defaults and per-topic callbacks.  Supports scan-to-local-submap odometry via `use_local_map=True` to reduce frame-to-frame drift.  A `LocalMap` helper class maintains a downsampled sliding window of the last N keyframe scans.
+- **SLAM session** – `SLAMSession` orchestration class that wires ICP odometry, Scan Context loop closure, pose-graph optimisation, and point-cloud map accumulation into a single object with sensible defaults and per-topic callbacks.  Supports scan-to-local-submap odometry via `use_local_map=True` to reduce frame-to-frame drift.  A `LocalMap` helper class maintains a downsampled sliding window of the last N keyframe scans.  Pass `imu_topic` to automatically accumulate IMU measurements between keyframes, pre-integrate them, and add an :class:`ImuFactor` edge to the pose graph for tightly-coupled IMU–LiDAR optimisation.
 - **Camera–LiDAR extrinsic calibration** – target-based extrinsic calibration using plane correspondences (`fit_plane`, `ransac_plane`, `calibrate_lidar_camera`).
 - **ROS examples** – ready-to-use launch / parameter files for Velodyne and Ouster LiDARs in both ROS 1 and ROS 2.
 
@@ -1274,6 +1274,43 @@ opt = optimize_pose_graph(
 )
 ```
 
+#### IMU Factor edges
+
+:class:`ImuFactor` edges encode tightly-coupled IMU constraints by wrapping
+a :class:`~sensor_transposition.imu.preintegration.PreintegrationResult`
+(ΔR, Δv, Δp) as a 6-DOF relative-pose constraint alongside ICP odometry edges.
+This improves robustness when LiDAR scans are sparse or degenerate.
+
+```python
+from sensor_transposition.imu.preintegration import ImuPreintegrator
+from sensor_transposition.pose_graph import PoseGraph, optimize_pose_graph
+import numpy as np
+
+graph = PoseGraph()
+graph.add_node(0, translation=[0.0, 0.0, 0.0])
+graph.add_node(1, translation=[0.5, 0.0, 0.0])
+
+# ICP odometry edge.
+graph.add_edge(from_id=0, to_id=1,
+               transform=icp_result.transform,
+               information=np.eye(6) * 100.0)
+
+# IMU pre-integration factor edge.
+integrator = ImuPreintegrator()
+preint = integrator.integrate(timestamps, accel, gyro)
+factor = graph.add_imu_factor(
+    from_id=0,
+    to_id=1,
+    preint_result=preint,
+    information=np.eye(6) * 10.0,   # lower confidence than ICP
+)
+
+# All ImuFactor objects are accessible via graph.imu_factors.
+print(len(graph.imu_factors))   # 1
+
+opt = optimize_pose_graph(graph)
+```
+
 ---
 
 ### Sliding-Window Smoother
@@ -1601,6 +1638,38 @@ for scan in lidar_scans:
     submap = local_map.get_submap()   # (M, 3) float array
     result = icp_align(scan, submap)
 ```
+
+#### Tightly-coupled IMU integration
+
+Pass ``imu_topic`` to :meth:`run` to automatically accumulate IMU readings
+between consecutive LiDAR keyframes and add an
+:class:`~sensor_transposition.pose_graph.ImuFactor` edge to the pose graph for
+each inter-keyframe window.  The factor encodes the pre-integrated (ΔR, Δv, Δp)
+increment as a 6-DOF relative-pose constraint alongside the ICP odometry edge,
+providing tighter coupling between IMU and LiDAR in the pose-graph back-end.
+
+```python
+from sensor_transposition.slam_session import SLAMSession
+from sensor_transposition.rosbag import BagReader
+
+with BagReader("session.sbag") as bag:
+    session = SLAMSession()
+    session.run(
+        bag,
+        lidar_topic="/lidar/points",
+        imu_topic="/imu/data",        # activates IMU factor integration
+        imu_information=10.0,         # confidence scalar for ImuFactor edges
+    )
+
+session.optimize()
+```
+
+IMU messages are expected to carry ``"accel"`` and ``"gyro"`` keys in their
+payload dict.  Use ``imu_accel_key`` and ``imu_gyro_key`` to customise the
+key names if your bag uses different field names.  A factor is only added
+when at least two IMU samples arrive between consecutive LiDAR keyframes.
+The last sample of each window is carried forward to ensure continuity across
+keyframe boundaries.
 
 Register callbacks for other sensor topics:
 

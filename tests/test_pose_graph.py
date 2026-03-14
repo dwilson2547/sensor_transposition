@@ -5,7 +5,9 @@ import math
 import numpy as np
 import pytest
 
+from sensor_transposition.imu.preintegration import ImuPreintegrator, PreintegrationResult
 from sensor_transposition.pose_graph import (
+    ImuFactor,
     OptimizationResult,
     PoseGraph,
     PoseGraphEdge,
@@ -457,3 +459,196 @@ class TestOptimizePoseGraphCorrectness:
         g.add_edge(1, 2, transform=T_12, information=np.eye(6) * 100.0)
         result = optimize_pose_graph(g, max_iterations=5)
         assert result.final_cost < 1e-10
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared by ImuFactor tests
+# ---------------------------------------------------------------------------
+
+
+def _make_preint_result(
+    delta_rotation=None,
+    delta_velocity=None,
+    delta_position=None,
+    duration: float = 0.2,
+    num_samples: int = 3,
+) -> PreintegrationResult:
+    """Construct a minimal PreintegrationResult for testing."""
+    return PreintegrationResult(
+        delta_rotation=delta_rotation if delta_rotation is not None else np.eye(3),
+        delta_velocity=delta_velocity if delta_velocity is not None else np.zeros(3),
+        delta_position=delta_position if delta_position is not None else np.zeros(3),
+        duration=duration,
+        num_samples=num_samples,
+    )
+
+
+def _integrate(accel=(0.0, 0.0, 0.0), gyro=(0.0, 0.0, 0.0), n: int = 3, dt: float = 0.1):
+    """Integrate a constant-measurement IMU sequence."""
+    ts = np.arange(n, dtype=float) * dt
+    a = np.tile(np.array(accel, dtype=float), (n, 1))
+    w = np.tile(np.array(gyro, dtype=float), (n, 1))
+    return ImuPreintegrator().integrate(ts, a, w)
+
+
+# ---------------------------------------------------------------------------
+# ImuFactor dataclass
+# ---------------------------------------------------------------------------
+
+
+class TestImuFactor:
+    def test_fields_stored(self):
+        pr = _make_preint_result()
+        factor = ImuFactor(from_id=0, to_id=1, preint_result=pr)
+        assert factor.from_id == 0
+        assert factor.to_id == 1
+        assert factor.preint_result is pr
+
+    def test_default_information_is_10_identity(self):
+        pr = _make_preint_result()
+        factor = ImuFactor(from_id=0, to_id=1, preint_result=pr)
+        np.testing.assert_allclose(factor.information, np.eye(6) * 10.0)
+
+    def test_custom_information(self):
+        pr = _make_preint_result()
+        Omega = np.eye(6) * 50.0
+        factor = ImuFactor(from_id=2, to_id=3, preint_result=pr, information=Omega)
+        np.testing.assert_allclose(factor.information, Omega)
+
+
+# ---------------------------------------------------------------------------
+# PoseGraph.add_imu_factor
+# ---------------------------------------------------------------------------
+
+
+class TestAddImuFactor:
+    def _two_node_graph(self):
+        g = PoseGraph()
+        g.add_node(0, translation=[0.0, 0.0, 0.0])
+        g.add_node(1, translation=[0.5, 0.0, 0.0])
+        return g
+
+    def test_returns_imu_factor(self):
+        g = self._two_node_graph()
+        pr = _make_preint_result()
+        factor = g.add_imu_factor(from_id=0, to_id=1, preint_result=pr)
+        assert isinstance(factor, ImuFactor)
+
+    def test_factor_stored_in_imu_factors(self):
+        g = self._two_node_graph()
+        pr = _make_preint_result()
+        g.add_imu_factor(from_id=0, to_id=1, preint_result=pr)
+        assert len(g.imu_factors) == 1
+        assert g.imu_factors[0].from_id == 0
+        assert g.imu_factors[0].to_id == 1
+
+    def test_underlying_edge_added(self):
+        """add_imu_factor must also insert a standard PoseGraphEdge."""
+        g = self._two_node_graph()
+        pr = _make_preint_result(delta_position=np.array([0.5, 0.0, 0.0]))
+        g.add_imu_factor(from_id=0, to_id=1, preint_result=pr)
+        assert len(g.edges) == 1
+        assert g.edges[0].from_id == 0
+        assert g.edges[0].to_id == 1
+
+    def test_edge_transform_encodes_delta_rotation_and_position(self):
+        """The edge transform must be [[ΔR, Δp], [0, 1]]."""
+        g = self._two_node_graph()
+        delta_R = _exp_so3(np.array([0.1, 0.0, 0.0]))
+        delta_p = np.array([0.2, 0.0, 0.0])
+        pr = _make_preint_result(delta_rotation=delta_R, delta_position=delta_p)
+        g.add_imu_factor(from_id=0, to_id=1, preint_result=pr)
+        T = g.edges[0].transform
+        np.testing.assert_allclose(T[:3, :3], delta_R, atol=1e-12)
+        np.testing.assert_allclose(T[:3, 3], delta_p, atol=1e-12)
+
+    def test_default_information_is_10_identity(self):
+        g = self._two_node_graph()
+        pr = _make_preint_result()
+        g.add_imu_factor(from_id=0, to_id=1, preint_result=pr)
+        np.testing.assert_allclose(g.edges[0].information, np.eye(6) * 10.0)
+
+    def test_custom_information_forwarded_to_edge(self):
+        g = self._two_node_graph()
+        pr = _make_preint_result()
+        Omega = np.eye(6) * 25.0
+        g.add_imu_factor(from_id=0, to_id=1, preint_result=pr, information=Omega)
+        np.testing.assert_allclose(g.edges[0].information, Omega)
+
+    def test_missing_from_node_raises(self):
+        g = PoseGraph()
+        g.add_node(1)
+        pr = _make_preint_result()
+        with pytest.raises(ValueError, match="from_id"):
+            g.add_imu_factor(from_id=99, to_id=1, preint_result=pr)
+
+    def test_missing_to_node_raises(self):
+        g = PoseGraph()
+        g.add_node(0)
+        pr = _make_preint_result()
+        with pytest.raises(ValueError, match="to_id"):
+            g.add_imu_factor(from_id=0, to_id=99, preint_result=pr)
+
+    def test_bad_information_shape_raises(self):
+        g = self._two_node_graph()
+        pr = _make_preint_result()
+        with pytest.raises(ValueError, match="6×6"):
+            g.add_imu_factor(from_id=0, to_id=1, preint_result=pr,
+                             information=np.eye(3))
+
+    def test_imu_factors_property_returns_copy(self):
+        g = self._two_node_graph()
+        pr = _make_preint_result()
+        g.add_imu_factor(from_id=0, to_id=1, preint_result=pr)
+        copy = g.imu_factors
+        copy.append(None)   # mutating the copy must not affect the graph
+        assert len(g.imu_factors) == 1
+
+    def test_multiple_factors(self):
+        g = PoseGraph()
+        g.add_node(0); g.add_node(1); g.add_node(2)
+        pr = _make_preint_result()
+        g.add_imu_factor(0, 1, pr)
+        g.add_imu_factor(1, 2, pr)
+        assert len(g.imu_factors) == 2
+        assert len(g.edges) == 2
+
+    def test_empty_imu_factors_initially(self):
+        g = PoseGraph()
+        assert g.imu_factors == []
+
+    def test_imu_factor_with_real_preintegration(self):
+        """Round-trip: integrate real IMU data and verify the edge transform."""
+        preint = _integrate(accel=(1.0, 0.0, 0.0))  # constant 1 m/s² along x
+        g = PoseGraph()
+        g.add_node(0, translation=[0.0, 0.0, 0.0])
+        g.add_node(1, translation=[0.0, 0.0, 0.0])
+        factor = g.add_imu_factor(from_id=0, to_id=1, preint_result=preint)
+
+        T = g.edges[0].transform
+        # No rotation expected (zero gyro).
+        np.testing.assert_allclose(T[:3, :3], np.eye(3), atol=1e-12)
+        # Position increment must match pre-integration Δp.
+        np.testing.assert_allclose(T[:3, 3], preint.delta_position, atol=1e-12)
+        # The factor stores the full PreintegrationResult (including Δv).
+        np.testing.assert_allclose(factor.preint_result.delta_velocity,
+                                   preint.delta_velocity, atol=1e-12)
+
+    def test_imu_factor_improves_optimisation(self):
+        """Adding an IMU factor edge alongside an ICP edge should still allow
+        successful pose-graph optimisation."""
+        preint = _integrate(accel=(0.5, 0.0, 0.0), n=5)
+        g = PoseGraph()
+        g.add_node(0, translation=[0.0, 0.0, 0.0])
+        g.add_node(1, translation=[0.8, 0.0, 0.0])  # noisy initial pose
+
+        # ICP-style odometry edge.
+        g.add_edge(from_id=0, to_id=1,
+                   transform=_translation_tf(1.0),
+                   information=np.eye(6) * 100.0)
+        # IMU factor edge.
+        g.add_imu_factor(from_id=0, to_id=1, preint_result=preint)
+
+        result = optimize_pose_graph(g, max_iterations=30)
+        assert result.success
+        assert result.final_cost >= 0.0
