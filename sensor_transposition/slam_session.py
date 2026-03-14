@@ -117,10 +117,53 @@ The convenience subclass :class:`LocalizationSession` wraps this workflow::
         session.run(bag)
 
     session.trajectory.to_csv("localization_trajectory.csv")
+
+Multi-session SLAM and map merging
+-----------------------------------
+A completed :class:`SLAMSession` can be serialized to disk and reloaded in a
+future session, or merged with a second session when a loop closure between
+them has been detected.
+
+**Saving and loading a session**::
+
+    # After a mapping run:
+    session.optimize()
+    session.save("run1.slam")          # ZIP archive containing all state
+
+    # In a later process:
+    from sensor_transposition.slam_session import SLAMSession
+    session = SLAMSession.load("run1.slam")
+
+**Merging two sessions**::
+
+    from sensor_transposition.slam_session import SLAMSession, merge_sessions
+    import numpy as np
+
+    session_a = SLAMSession.load("area_a.slam")
+    session_b = SLAMSession.load("area_b.slam")
+
+    # A loop edge discovered between node 42 in session_a and node 0 in
+    # session_b, represented as a 4×4 SE(3) relative-pose transform.
+    loop_transform = np.eye(4)
+    loop_transform[:3, 3] = [1.0, 0.5, 0.0]
+    from sensor_transposition.pose_graph import PoseGraphEdge
+    loop_edge = PoseGraphEdge(
+        from_id=42, to_id=0,
+        transform=loop_transform,
+        information=np.eye(6) * 50.0,
+    )
+
+    merged = merge_sessions(session_a, session_b, loop_edge)
+    merged.optimize()
+    merged.point_cloud_map.save_pcd("merged.pcd")
 """
 
 from __future__ import annotations
 
+import io
+import json
+import tempfile
+import zipfile
 from typing import Callable, Dict, List, Optional, Union
 
 import numpy as np
@@ -130,7 +173,7 @@ from sensor_transposition.imu.preintegration import ImuPreintegrator
 from sensor_transposition.lidar.scan_matching import icp_align
 from sensor_transposition.loop_closure import ScanContextDatabase, compute_scan_context
 from sensor_transposition.point_cloud_map import PointCloudMap
-from sensor_transposition.pose_graph import PoseGraph, optimize_pose_graph
+from sensor_transposition.pose_graph import PoseGraph, PoseGraphEdge, optimize_pose_graph
 from sensor_transposition.rosbag import BagReader
 
 
@@ -408,6 +451,200 @@ class SLAMSession:
                 "Expected a .pcd or .ply file."
             )
         self._localization_only = True
+
+    # ------------------------------------------------------------------
+    # Session serialization / deserialization
+    # ------------------------------------------------------------------
+
+    def save(self, path: str) -> None:
+        """Save the complete session state to a ``.slam`` ZIP archive.
+
+        The archive contains the following entries:
+
+        * ``metadata.json`` – session construction parameters.
+        * ``graph.json`` – pose-graph nodes and edges.
+        * ``trajectory.json`` – trajectory (all :class:`~sensor_transposition.frame_pose.FramePose` records).
+        * ``scan_context_db.npz`` – scan-context descriptor matrices and frame IDs.
+        * ``scans.npz`` – raw sensor-frame scans (needed for map rebuilding after
+          loading and re-optimising).
+        * ``points.pcd`` – accumulated world-frame point-cloud map.
+
+        Args:
+            path: Destination file path (e.g. ``"session.slam"``).  The
+                ``.slam`` extension is recommended but not enforced.
+
+        Example::
+
+            session.optimize()
+            session.save("run1.slam")
+
+            # Later:
+            restored = SLAMSession.load("run1.slam")
+        """
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            # ----- metadata -----
+            meta = {
+                "icp_max_iterations": self._icp_max_iterations,
+                "icp_max_distance": self._icp_max_distance,
+                "loop_closure_threshold": self._loop_closure_threshold,
+                "loop_closure_min_gap": self._loop_closure_min_gap,
+                "pg_max_iterations": self._pg_max_iterations,
+                "sc_num_rings": self._loop_db.num_rings,
+                "sc_num_sectors": self._loop_db.num_sectors,
+                "sc_max_range": float(self._loop_db.max_range),
+                "localization_only": self._localization_only,
+            }
+            zf.writestr("metadata.json", json.dumps(meta))
+
+            # ----- pose graph -----
+            nodes_list = [
+                {
+                    "node_id": nid,
+                    "translation": node.translation,
+                    "quaternion": node.quaternion,
+                }
+                for nid, node in self._pose_graph._nodes.items()
+            ]
+            edges_list = [
+                {
+                    "from_id": e.from_id,
+                    "to_id": e.to_id,
+                    "transform": e.transform.tolist(),
+                    "information": e.information.tolist(),
+                }
+                for e in self._pose_graph._edges
+            ]
+            graph_data = {"nodes": nodes_list, "edges": edges_list}
+            zf.writestr("graph.json", json.dumps(graph_data))
+
+            # ----- trajectory -----
+            traj_data = self._trajectory.to_dict()
+            zf.writestr("trajectory.json", json.dumps(traj_data))
+
+            # ----- scan-context database -----
+            if self._loop_db._descriptors:
+                sc_matrices = np.array(
+                    [d.matrix for d in self._loop_db._descriptors], dtype=float
+                )
+            else:
+                sc_matrices = np.empty(
+                    (0, self._loop_db.num_rings, self._loop_db.num_sectors)
+                )
+            sc_frame_ids = np.array(self._loop_db._frame_ids, dtype=np.int64)
+            sc_buf = io.BytesIO()
+            np.savez_compressed(sc_buf, matrices=sc_matrices, frame_ids=sc_frame_ids)
+            zf.writestr("scan_context_db.npz", sc_buf.getvalue())
+
+            # ----- raw scans -----
+            scans_buf = io.BytesIO()
+            scans_dict = {f"scan_{i}": s for i, s in enumerate(self._scans)}
+            np.savez_compressed(scans_buf, **scans_dict)
+            zf.writestr("scans.npz", scans_buf.getvalue())
+
+            # ----- point-cloud map -----
+            with tempfile.NamedTemporaryFile(suffix=".pcd", delete=False) as tf:
+                pcd_path = tf.name
+            try:
+                self._point_cloud_map.save_pcd(pcd_path)
+                zf.write(pcd_path, "points.pcd")
+            finally:
+                import os
+                os.unlink(pcd_path)
+
+    @classmethod
+    def load(cls, path: str) -> "SLAMSession":
+        """Load a session previously saved with :meth:`save`.
+
+        Reconstructs and returns a new :class:`SLAMSession` instance with the
+        same internal state as when :meth:`save` was called.  The session can
+        then be used directly for further processing — e.g. :meth:`optimize`,
+        :meth:`load_map`, or :func:`merge_sessions`.
+
+        Args:
+            path: Path to a ``.slam`` archive written by :meth:`save`.
+
+        Returns:
+            A fully populated :class:`SLAMSession` instance.
+
+        Raises:
+            FileNotFoundError: If *path* does not exist.
+            zipfile.BadZipFile: If *path* is not a valid ZIP archive.
+            KeyError: If the archive is missing one of the expected entries.
+
+        Example::
+
+            session = SLAMSession.load("run1.slam")
+            session.optimize()
+            session.point_cloud_map.save_pcd("map.pcd")
+        """
+        with zipfile.ZipFile(path, "r") as zf:
+            # ----- metadata -----
+            meta = json.loads(zf.read("metadata.json"))
+            session = cls(
+                icp_max_iterations=meta.get("icp_max_iterations", 50),
+                icp_max_distance=meta.get("icp_max_distance"),
+                sc_num_rings=meta.get("sc_num_rings", 20),
+                sc_num_sectors=meta.get("sc_num_sectors", 60),
+                sc_max_range=meta.get("sc_max_range", 80.0),
+                loop_closure_threshold=meta.get("loop_closure_threshold", 0.15),
+                loop_closure_min_gap=meta.get("loop_closure_min_gap", 5),
+                pg_max_iterations=meta.get("pg_max_iterations", 50),
+            )
+            session._localization_only = meta.get("localization_only", False)
+
+            # ----- pose graph -----
+            graph_data = json.loads(zf.read("graph.json"))
+            for n in graph_data["nodes"]:
+                session._pose_graph.add_node(
+                    n["node_id"],
+                    translation=n["translation"],
+                    quaternion=n["quaternion"],
+                )
+            for e in graph_data["edges"]:
+                session._pose_graph.add_edge(
+                    from_id=e["from_id"],
+                    to_id=e["to_id"],
+                    transform=np.array(e["transform"], dtype=float),
+                    information=np.array(e["information"], dtype=float),
+                )
+
+            # ----- trajectory -----
+            traj_data = json.loads(zf.read("trajectory.json"))
+            session._trajectory = FramePoseSequence.from_dict(traj_data)
+
+            # ----- scan-context database -----
+            sc_buf = io.BytesIO(zf.read("scan_context_db.npz"))
+            sc_npz = np.load(sc_buf, allow_pickle=False)
+            sc_matrices = sc_npz["matrices"]    # (N, num_rings, num_sectors)
+            sc_frame_ids = sc_npz["frame_ids"]  # (N,)
+            from sensor_transposition.loop_closure import ScanContextDescriptor
+            for mat, fid in zip(sc_matrices, sc_frame_ids):
+                desc = ScanContextDescriptor(
+                    matrix=mat,
+                    ring_key=mat.mean(axis=1),
+                    num_rings=session._loop_db.num_rings,
+                    num_sectors=session._loop_db.num_sectors,
+                    max_range=session._loop_db.max_range,
+                )
+                session._loop_db.add(desc, frame_id=int(fid))
+
+            # ----- raw scans -----
+            scans_buf = io.BytesIO(zf.read("scans.npz"))
+            scans_npz = np.load(scans_buf, allow_pickle=False)
+            n_scans = len(scans_npz.files)
+            session._scans = [scans_npz[f"scan_{i}"] for i in range(n_scans)]
+
+            # ----- point-cloud map -----
+            with tempfile.NamedTemporaryFile(suffix=".pcd", delete=False) as tf:
+                pcd_path = tf.name
+                tf.write(zf.read("points.pcd"))
+            try:
+                session._point_cloud_map = PointCloudMap.from_pcd(pcd_path)
+            finally:
+                import os
+                os.unlink(pcd_path)
+
+        return session
 
     # ------------------------------------------------------------------
     # Callback registration
@@ -781,3 +1018,170 @@ class LocalizationSession(SLAMSession):
     def __init__(self, map_path: str, **kwargs) -> None:
         super().__init__(**kwargs)
         self.load_map(map_path)
+
+
+# ---------------------------------------------------------------------------
+# merge_sessions
+# ---------------------------------------------------------------------------
+
+
+def merge_sessions(
+    session_a: SLAMSession,
+    session_b: SLAMSession,
+    loop_edge: PoseGraphEdge,
+) -> SLAMSession:
+    """Merge two independently built :class:`SLAMSession` instances.
+
+    Given a known inter-session loop-closure edge, this function creates a
+    new :class:`SLAMSession` containing the combined pose graph, trajectory,
+    point-cloud map, and scan-context database from both input sessions.
+    Calling :meth:`SLAMSession.optimize` on the result will jointly optimise
+    all nodes from both sessions using the loop edge as a global constraint,
+    correcting the accumulated drift between the two runs.
+
+    **Node ID remapping:**
+    Nodes from *session_a* keep their original IDs.  Nodes from *session_b*
+    are shifted by ``id_offset = max(session_a node IDs) + 1`` to avoid
+    collisions.  The ``to_id`` of *loop_edge* must be a node ID in
+    *session_b*'s **original** numbering; it is remapped automatically.
+
+    Args:
+        session_a: The first :class:`SLAMSession`.  Its node IDs are kept
+            unchanged in the merged graph.
+        session_b: The second :class:`SLAMSession`.  Its node IDs are shifted
+            by ``max(session_a node IDs) + 1`` to avoid collisions.
+        loop_edge: A :class:`~sensor_transposition.pose_graph.PoseGraphEdge`
+            connecting a node in *session_a* (``from_id`` in *session_a*'s
+            node space) to a node in *session_b* (``to_id`` in *session_b*'s
+            **original** node space, before any offset is applied).
+
+    Returns:
+        A new :class:`SLAMSession` containing the merged state.  The session
+        parameters (ICP settings, scan-context parameters, etc.) are taken
+        from *session_a*.
+
+    Raises:
+        ValueError: If *loop_edge.from_id* is not a valid node ID in
+            *session_a*, or if *loop_edge.to_id* is not a valid node ID in
+            *session_b*.
+
+    Example::
+
+        import numpy as np
+        from sensor_transposition.slam_session import SLAMSession, merge_sessions
+        from sensor_transposition.pose_graph import PoseGraphEdge
+
+        session_a = SLAMSession.load("area_a.slam")
+        session_b = SLAMSession.load("area_b.slam")
+
+        loop_transform = np.eye(4)
+        loop_transform[:3, 3] = [2.0, 0.0, 0.0]
+        loop_edge = PoseGraphEdge(
+            from_id=42, to_id=0,
+            transform=loop_transform,
+            information=np.eye(6) * 50.0,
+        )
+
+        merged = merge_sessions(session_a, session_b, loop_edge)
+        merged.optimize()
+        merged.point_cloud_map.save_pcd("merged_map.pcd")
+    """
+    nodes_a = session_a._pose_graph._nodes
+    nodes_b = session_b._pose_graph._nodes
+
+    if loop_edge.from_id not in nodes_a:
+        raise ValueError(
+            f"loop_edge.from_id={loop_edge.from_id} is not a node in session_a."
+        )
+    if loop_edge.to_id not in nodes_b:
+        raise ValueError(
+            f"loop_edge.to_id={loop_edge.to_id} is not a node in session_b."
+        )
+
+    # Compute ID offset so that session_b node IDs do not clash with session_a.
+    id_offset = (max(nodes_a.keys()) + 1) if nodes_a else 0
+
+    # Create the merged session using session_a's parameters as a base.
+    merged = SLAMSession(
+        icp_max_iterations=session_a._icp_max_iterations,
+        icp_max_distance=session_a._icp_max_distance,
+        sc_num_rings=session_a._loop_db.num_rings,
+        sc_num_sectors=session_a._loop_db.num_sectors,
+        sc_max_range=session_a._loop_db.max_range,
+        loop_closure_threshold=session_a._loop_closure_threshold,
+        loop_closure_min_gap=session_a._loop_closure_min_gap,
+        pg_max_iterations=session_a._pg_max_iterations,
+    )
+
+    # ----- Pose graph: nodes -----
+    for nid, node in nodes_a.items():
+        merged._pose_graph.add_node(
+            nid,
+            translation=list(node.translation),
+            quaternion=list(node.quaternion),
+        )
+    for nid, node in nodes_b.items():
+        merged._pose_graph.add_node(
+            nid + id_offset,
+            translation=list(node.translation),
+            quaternion=list(node.quaternion),
+        )
+
+    # ----- Pose graph: edges from session_a -----
+    for edge in session_a._pose_graph._edges:
+        merged._pose_graph.add_edge(
+            from_id=edge.from_id,
+            to_id=edge.to_id,
+            transform=edge.transform,
+            information=edge.information,
+        )
+
+    # ----- Pose graph: edges from session_b (IDs remapped) -----
+    for edge in session_b._pose_graph._edges:
+        merged._pose_graph.add_edge(
+            from_id=edge.from_id + id_offset,
+            to_id=edge.to_id + id_offset,
+            transform=edge.transform,
+            information=edge.information,
+        )
+
+    # ----- Inter-session loop-closure edge -----
+    merged._pose_graph.add_edge(
+        from_id=loop_edge.from_id,
+        to_id=loop_edge.to_id + id_offset,
+        transform=loop_edge.transform,
+        information=loop_edge.information,
+    )
+
+    # ----- Raw scans -----
+    merged._scans = list(session_a._scans) + list(session_b._scans)
+
+    # ----- Point-cloud map: concatenate world-frame points -----
+    pts_a = session_a._point_cloud_map.get_points()
+    pts_b = session_b._point_cloud_map.get_points()
+    clr_a = session_a._point_cloud_map.get_colors()
+    clr_b = session_b._point_cloud_map.get_colors()
+    if pts_a.shape[0] > 0 or pts_b.shape[0] > 0:
+        if pts_a.shape[0] > 0:
+            merged._point_cloud_map.add_scan(pts_a, np.eye(4), colors=clr_a)
+        if pts_b.shape[0] > 0:
+            merged._point_cloud_map.add_scan(pts_b, np.eye(4), colors=clr_b)
+
+    # ----- Trajectory: concatenate both sequences -----
+    for pose in session_a._trajectory:
+        merged._trajectory.add_pose(pose)
+    for pose in session_b._trajectory:
+        merged._trajectory.add_pose(pose)
+
+    # ----- Scan-context database: re-add all descriptors with remapped IDs -----
+    from sensor_transposition.loop_closure import ScanContextDescriptor
+    for desc, fid in zip(
+        session_a._loop_db._descriptors, session_a._loop_db._frame_ids
+    ):
+        merged._loop_db.add(desc, frame_id=fid)
+    for desc, fid in zip(
+        session_b._loop_db._descriptors, session_b._loop_db._frame_ids
+    ):
+        merged._loop_db.add(desc, frame_id=fid + id_offset)
+
+    return merged

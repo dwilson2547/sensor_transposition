@@ -459,3 +459,258 @@ class TestSLAMSessionImuIntegration:
                 np.testing.assert_allclose(factor.information, np.eye(6) * 25.0)
         finally:
             os.unlink(bag_path)
+
+
+
+# ---------------------------------------------------------------------------
+# SLAMSession.save / SLAMSession.load
+# ---------------------------------------------------------------------------
+
+
+def _mktemp_path(suffix: str) -> str:
+    """Create a secure temporary file path using mkstemp and return the path."""
+    fd, path = tempfile.mkstemp(suffix=suffix)
+    os.close(fd)
+    return path
+
+
+class TestSLAMSessionSaveLoad:
+    """Round-trip tests for SLAMSession.save() and SLAMSession.load()."""
+
+    def _build_session(self, n_scans: int = 4, seed: int = 0) -> SLAMSession:
+        """Build a minimal SLAMSession from synthetic LiDAR data."""
+        rng = np.random.default_rng(seed)
+        scans = [rng.uniform(-5.0, 5.0, (80, 3)) for _ in range(n_scans)]
+        bag_fd, bag_path = tempfile.mkstemp(suffix=".sbag")
+        os.close(bag_fd)
+        _write_bag_with_scans(bag_path, scans)
+        session = SLAMSession()
+        try:
+            with BagReader(bag_path) as bag:
+                session.run(bag, lidar_topic="/lidar/points")
+        finally:
+            os.unlink(bag_path)
+        return session
+
+    def test_save_creates_zip_archive(self):
+        import zipfile
+        session = self._build_session()
+        slam_path = _mktemp_path(suffix=".slam")
+        try:
+            session.save(slam_path)
+            assert os.path.exists(slam_path)
+            assert zipfile.is_zipfile(slam_path)
+        finally:
+            if os.path.exists(slam_path):
+                os.unlink(slam_path)
+
+    def test_save_archive_contains_expected_entries(self):
+        import zipfile
+        session = self._build_session()
+        slam_path = _mktemp_path(suffix=".slam")
+        try:
+            session.save(slam_path)
+            with zipfile.ZipFile(slam_path, "r") as zf:
+                names = zf.namelist()
+            for expected in ("metadata.json", "graph.json", "trajectory.json",
+                             "scan_context_db.npz", "scans.npz", "points.pcd"):
+                assert expected in names, f"Missing entry: {expected}"
+        finally:
+            if os.path.exists(slam_path):
+                os.unlink(slam_path)
+
+    def test_load_restores_pose_graph_nodes(self):
+        session = self._build_session(n_scans=4)
+        slam_path = _mktemp_path(suffix=".slam")
+        try:
+            session.save(slam_path)
+            restored = SLAMSession.load(slam_path)
+            assert set(restored.pose_graph.nodes.keys()) == set(session.pose_graph.nodes.keys())
+        finally:
+            if os.path.exists(slam_path):
+                os.unlink(slam_path)
+
+    def test_load_restores_pose_graph_edges(self):
+        session = self._build_session(n_scans=4)
+        slam_path = _mktemp_path(suffix=".slam")
+        try:
+            session.save(slam_path)
+            restored = SLAMSession.load(slam_path)
+            assert len(restored.pose_graph.edges) == len(session.pose_graph.edges)
+        finally:
+            if os.path.exists(slam_path):
+                os.unlink(slam_path)
+
+    def test_load_restores_trajectory_length(self):
+        session = self._build_session(n_scans=4)
+        slam_path = _mktemp_path(suffix=".slam")
+        try:
+            session.save(slam_path)
+            restored = SLAMSession.load(slam_path)
+            assert len(restored.trajectory) == len(session.trajectory)
+        finally:
+            if os.path.exists(slam_path):
+                os.unlink(slam_path)
+
+    def test_load_restores_scan_count(self):
+        session = self._build_session(n_scans=4)
+        slam_path = _mktemp_path(suffix=".slam")
+        try:
+            session.save(slam_path)
+            restored = SLAMSession.load(slam_path)
+            assert len(restored._scans) == len(session._scans)
+        finally:
+            if os.path.exists(slam_path):
+                os.unlink(slam_path)
+
+    def test_load_restores_point_cloud_map(self):
+        session = self._build_session(n_scans=4)
+        slam_path = _mktemp_path(suffix=".slam")
+        try:
+            session.save(slam_path)
+            restored = SLAMSession.load(slam_path)
+            pts_orig = session.point_cloud_map.get_points()
+            pts_rest = restored.point_cloud_map.get_points()
+            assert pts_orig.shape == pts_rest.shape
+        finally:
+            if os.path.exists(slam_path):
+                os.unlink(slam_path)
+
+    def test_load_restores_session_parameters(self):
+        session = SLAMSession(icp_max_iterations=30, loop_closure_threshold=0.2)
+        slam_path = _mktemp_path(suffix=".slam")
+        try:
+            session.save(slam_path)
+            restored = SLAMSession.load(slam_path)
+            assert restored._icp_max_iterations == 30
+            assert restored._loop_closure_threshold == 0.2
+        finally:
+            if os.path.exists(slam_path):
+                os.unlink(slam_path)
+
+    def test_load_scan_context_db_length_matches(self):
+        session = self._build_session(n_scans=4)
+        slam_path = _mktemp_path(suffix=".slam")
+        try:
+            session.save(slam_path)
+            restored = SLAMSession.load(slam_path)
+            assert len(restored.loop_db) == len(session.loop_db)
+        finally:
+            if os.path.exists(slam_path):
+                os.unlink(slam_path)
+
+    def test_save_load_empty_session(self):
+        """A session with no scans should round-trip without error."""
+        session = SLAMSession()
+        slam_path = _mktemp_path(suffix=".slam")
+        try:
+            session.save(slam_path)
+            restored = SLAMSession.load(slam_path)
+            assert len(restored.trajectory) == 0
+            assert len(restored.pose_graph.nodes) == 0
+        finally:
+            if os.path.exists(slam_path):
+                os.unlink(slam_path)
+
+
+# ---------------------------------------------------------------------------
+# merge_sessions
+# ---------------------------------------------------------------------------
+
+
+class TestMergeSessions:
+    """Tests for the merge_sessions() utility function."""
+
+    def _build_session(self, n_scans: int = 3, seed: int = 0) -> SLAMSession:
+        rng = np.random.default_rng(seed)
+        scans = [rng.uniform(-5.0, 5.0, (80, 3)) for _ in range(n_scans)]
+        bag_fd, bag_path = tempfile.mkstemp(suffix=".sbag")
+        os.close(bag_fd)
+        _write_bag_with_scans(bag_path, scans)
+        session = SLAMSession()
+        try:
+            with BagReader(bag_path) as bag:
+                session.run(bag, lidar_topic="/lidar/points")
+        finally:
+            os.unlink(bag_path)
+        return session
+
+    def _make_loop_edge(self, from_id: int, to_id: int) -> "PoseGraphEdge":
+        from sensor_transposition.pose_graph import PoseGraphEdge
+        T = np.eye(4)
+        T[:3, 3] = [1.0, 0.0, 0.0]
+        return PoseGraphEdge(from_id=from_id, to_id=to_id,
+                             transform=T, information=np.eye(6) * 50.0)
+
+    def test_merged_node_count(self):
+        from sensor_transposition.slam_session import merge_sessions
+        sa = self._build_session(n_scans=3)
+        sb = self._build_session(n_scans=3, seed=10)
+        loop_edge = self._make_loop_edge(from_id=2, to_id=0)
+        merged = merge_sessions(sa, sb, loop_edge)
+        expected = len(sa.pose_graph.nodes) + len(sb.pose_graph.nodes)
+        assert len(merged.pose_graph.nodes) == expected
+
+    def test_merged_edge_count_includes_loop_edge(self):
+        from sensor_transposition.slam_session import merge_sessions
+        sa = self._build_session(n_scans=3)
+        sb = self._build_session(n_scans=3, seed=10)
+        loop_edge = self._make_loop_edge(from_id=2, to_id=0)
+        merged = merge_sessions(sa, sb, loop_edge)
+        expected = len(sa.pose_graph.edges) + len(sb.pose_graph.edges) + 1
+        assert len(merged.pose_graph.edges) == expected
+
+    def test_session_a_node_ids_unchanged(self):
+        from sensor_transposition.slam_session import merge_sessions
+        sa = self._build_session(n_scans=3)
+        sb = self._build_session(n_scans=3, seed=10)
+        loop_edge = self._make_loop_edge(from_id=2, to_id=0)
+        merged = merge_sessions(sa, sb, loop_edge)
+        ids_a = set(sa.pose_graph.nodes.keys())
+        assert ids_a.issubset(set(merged.pose_graph.nodes.keys()))
+
+    def test_session_b_node_ids_are_offset(self):
+        from sensor_transposition.slam_session import merge_sessions
+        sa = self._build_session(n_scans=3)
+        sb = self._build_session(n_scans=3, seed=10)
+        loop_edge = self._make_loop_edge(from_id=2, to_id=0)
+        id_offset = max(sa.pose_graph.nodes.keys()) + 1
+        merged = merge_sessions(sa, sb, loop_edge)
+        for orig_id in sb.pose_graph.nodes.keys():
+            assert (orig_id + id_offset) in merged.pose_graph.nodes
+
+    def test_merged_trajectory_length(self):
+        from sensor_transposition.slam_session import merge_sessions
+        sa = self._build_session(n_scans=3)
+        sb = self._build_session(n_scans=3, seed=10)
+        loop_edge = self._make_loop_edge(from_id=2, to_id=0)
+        merged = merge_sessions(sa, sb, loop_edge)
+        assert len(merged.trajectory) == len(sa.trajectory) + len(sb.trajectory)
+
+    def test_merged_scan_count(self):
+        from sensor_transposition.slam_session import merge_sessions
+        sa = self._build_session(n_scans=3)
+        sb = self._build_session(n_scans=3, seed=10)
+        loop_edge = self._make_loop_edge(from_id=2, to_id=0)
+        merged = merge_sessions(sa, sb, loop_edge)
+        assert len(merged._scans) == len(sa._scans) + len(sb._scans)
+
+    def test_invalid_from_id_raises(self):
+        from sensor_transposition.slam_session import merge_sessions
+        sa = self._build_session(n_scans=2)
+        sb = self._build_session(n_scans=2, seed=10)
+        bad_edge = self._make_loop_edge(from_id=999, to_id=0)
+        with pytest.raises(ValueError, match="from_id"):
+            merge_sessions(sa, sb, bad_edge)
+
+    def test_invalid_to_id_raises(self):
+        from sensor_transposition.slam_session import merge_sessions
+        sa = self._build_session(n_scans=2)
+        sb = self._build_session(n_scans=2, seed=10)
+        bad_edge = self._make_loop_edge(from_id=0, to_id=999)
+        with pytest.raises(ValueError, match="to_id"):
+            merge_sessions(sa, sb, bad_edge)
+
+    def test_merge_sessions_exported_from_package(self):
+        import sensor_transposition as st
+        assert hasattr(st, "merge_sessions")

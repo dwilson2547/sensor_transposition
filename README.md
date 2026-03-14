@@ -48,6 +48,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
   - [Camera–LiDAR Extrinsic Calibration](#cameralidar-extrinsic-calibration)
   - [SLAM Session (Pipeline Orchestration)](#slam-session-pipeline-orchestration)
 - [Localization Against a Pre-Built Map](#localization-against-a-pre-built-map)
+- [Multi-Session SLAM and Map Merging](#multi-session-slam-and-map-merging)
 - [Error Handling](#error-handling)
 - [Configuration Example](#configuration-example)
 - [Quick-Start: End-to-End SLAM Pipeline](#quick-start-end-to-end-slam-pipeline)
@@ -1746,6 +1747,100 @@ session.trajectory.to_csv("localization_trajectory.csv")
 
 The `SLAMSession.optimize()` method is a no-op in localization-only mode
 because no pose graph is built.
+
+---
+
+## Multi-Session SLAM and Map Merging
+
+`SLAMSession` supports two complementary workflows that go beyond a single
+mapping run:
+
+1. **Saving and reloading** a completed session so that its pose graph,
+   trajectory, point-cloud map, and scan-context database can be inspected or
+   extended in a future process.
+2. **Merging two independently built sessions** when a loop-closure between
+   them is detected (e.g. from two survey robots or two separate survey runs
+   of overlapping areas).
+
+### Saving and loading a session
+
+After a mapping run, call `SLAMSession.save(path)` to write a `.slam` ZIP
+archive containing all session state.  The archive holds the following entries:
+
+| Entry | Contents |
+|---|---|
+| `metadata.json` | Session construction parameters |
+| `graph.json` | Pose-graph nodes and edges |
+| `trajectory.json` | Ego-pose trajectory |
+| `scan_context_db.npz` | Scan Context descriptor matrices and frame IDs |
+| `scans.npz` | Raw sensor-frame scans (for map rebuilding after re-optimisation) |
+| `points.pcd` | Accumulated world-frame point-cloud map |
+
+```python
+from sensor_transposition.slam_session import SLAMSession
+
+# Build the map.
+session = SLAMSession()
+# ... run session with a BagReader ...
+session.optimize()
+
+# Persist to disk.
+session.save("run1.slam")
+
+# Load back in a later process.
+restored = SLAMSession.load("run1.slam")
+restored.point_cloud_map.save_pcd("map.pcd")
+```
+
+### Merging two sessions
+
+`merge_sessions(session_a, session_b, loop_edge)` creates a new
+`SLAMSession` that contains the combined pose graph, trajectory, point-cloud
+map, and scan-context database from both input sessions.
+
+**Node ID remapping:** Nodes from `session_a` keep their original IDs.  Nodes
+from `session_b` are shifted by `max(session_a node IDs) + 1` to avoid
+collisions.  The `to_id` of `loop_edge` must use `session_b`'s **original**
+node numbering — the offset is applied automatically.
+
+```python
+import numpy as np
+from sensor_transposition.slam_session import SLAMSession, merge_sessions
+from sensor_transposition.pose_graph import PoseGraphEdge
+
+session_a = SLAMSession.load("area_a.slam")
+session_b = SLAMSession.load("area_b.slam")
+
+# A loop closure was detected between node 42 in session_a and node 0 in
+# session_b.  Provide the measured relative SE(3) transform.
+loop_transform = np.eye(4)
+loop_transform[:3, 3] = [2.0, 0.5, 0.0]   # approximate translation
+loop_edge = PoseGraphEdge(
+    from_id=42, to_id=0,
+    transform=loop_transform,
+    information=np.eye(6) * 50.0,
+)
+
+merged = merge_sessions(session_a, session_b, loop_edge)
+merged.optimize()                          # joint optimisation over both maps
+merged.point_cloud_map.save_pcd("merged.pcd")
+merged.save("merged_session.slam")
+```
+
+### Typical multi-session workflow
+
+1. **Independent mapping runs** — each robot or survey run produces its own
+   `.slam` file via `SLAMSession.save()`.
+2. **Loop-closure detection** — use `ScanContextDatabase` or
+   `ImageLoopClosureDatabase` to find matching frames across sessions.  Verify
+   the candidate geometrically with `icp_align` to obtain the inter-session
+   transform.
+3. **Merge** — call `merge_sessions()` with the verified loop edge.
+4. **Joint optimisation** — call `merged.optimize()` to jointly optimise all
+   node poses across both sessions using the loop edge as a global constraint.
+5. **Export** — save the merged map with
+   `merged.point_cloud_map.save_pcd("merged.pcd")` or persist the entire
+   merged session with `merged.save("merged_session.slam")` for future runs.
 
 ---
 
