@@ -100,6 +100,8 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 import numpy as np
 
+from sensor_transposition.imu.preintegration import PreintegrationResult
+
 
 # ---------------------------------------------------------------------------
 # Internal SE(3) / SO(3) helpers
@@ -283,6 +285,38 @@ class PoseGraphEdge:
     information: np.ndarray = field(default_factory=lambda: np.eye(6))
 
 
+@dataclass
+class ImuFactor:
+    """An IMU pre-integration factor connecting two consecutive keyframe nodes.
+
+    Stores the compact (ΔR, Δv, Δp) pre-integration result produced by
+    :class:`~sensor_transposition.imu.preintegration.ImuPreintegrator` for
+    the IMU measurements accumulated between two LiDAR/camera keyframes.
+
+    The factor is converted to a 6-DOF SE(3) relative-pose constraint via
+    :meth:`PoseGraph.add_imu_factor`, which inserts a standard
+    :class:`PoseGraphEdge` into the graph using the pre-integrated rotation
+    ΔR and position Δp as the measured relative transform.
+
+    Attributes:
+        from_id: ``node_id`` of the keyframe at the *start* of the IMU
+            integration window.
+        to_id: ``node_id`` of the keyframe at the *end* of the IMU
+            integration window.
+        preint_result: :class:`~sensor_transposition.imu.preintegration.PreintegrationResult`
+            holding (ΔR, Δv, Δp) for the integration window.
+        information: 6×6 information matrix weighting this factor in the pose
+            graph.  Ordering is ``[tx, ty, tz, rx, ry, rz]``.  Defaults to
+            ``np.eye(6) * 10.0`` (lower than the ICP default of 100 to
+            reflect the higher uncertainty of IMU-only dead-reckoning).
+    """
+
+    from_id: int
+    to_id: int
+    preint_result: PreintegrationResult
+    information: np.ndarray = field(default_factory=lambda: np.eye(6) * 10.0)
+
+
 # ---------------------------------------------------------------------------
 # PoseGraph
 # ---------------------------------------------------------------------------
@@ -313,6 +347,7 @@ class PoseGraph:
     def __init__(self) -> None:
         self._nodes: Dict[int, PoseGraphNode] = {}
         self._edges: List[PoseGraphEdge] = []
+        self._imu_factors: List[ImuFactor] = []
 
     # ------------------------------------------------------------------
     # Node management
@@ -428,6 +463,76 @@ class PoseGraph:
         self._edges.append(edge)
         return edge
 
+    def add_imu_factor(
+        self,
+        from_id: int,
+        to_id: int,
+        preint_result: PreintegrationResult,
+        *,
+        information: np.ndarray | None = None,
+    ) -> ImuFactor:
+        """Add an IMU pre-integration factor to the pose graph.
+
+        Converts the (ΔR, Δp) from *preint_result* into a 4×4 SE(3)
+        relative-pose transform ``[[ΔR, Δp], [0, 0, 0, 1]]`` and inserts it
+        into the graph as a standard odometry edge via :meth:`add_edge`.
+        The full :class:`~sensor_transposition.imu.preintegration.PreintegrationResult`
+        (including Δv) is preserved in the returned :class:`ImuFactor`.
+
+        Args:
+            from_id: ``node_id`` of the keyframe at the start of the IMU
+                integration window.  Must already exist in the graph.
+            to_id: ``node_id`` of the keyframe at the end of the integration
+                window.  Must already exist in the graph.
+            preint_result: Pre-integrated (ΔR, Δv, Δp) result from
+                :class:`~sensor_transposition.imu.preintegration.ImuPreintegrator`.
+            information: Optional 6×6 information matrix weighting the
+                factor.  Defaults to ``np.eye(6) * 10.0`` (lower than the
+                ICP default of 100 to reflect the higher positional
+                uncertainty of IMU-only dead-reckoning).
+
+        Returns:
+            The created :class:`ImuFactor`.
+
+        Raises:
+            ValueError: If either node ID does not exist in the graph or if
+                *information* is not 6×6.
+
+        Example::
+
+            from sensor_transposition.imu.preintegration import ImuPreintegrator
+            import numpy as np
+
+            integrator = ImuPreintegrator()
+            preint = integrator.integrate(timestamps, accel, gyro)
+
+            graph.add_node(0, translation=[0.0, 0.0, 0.0])
+            graph.add_node(1, translation=[0.1, 0.0, 0.0])
+            factor = graph.add_imu_factor(from_id=0, to_id=1, preint_result=preint)
+        """
+        if information is None:
+            Omega = np.eye(6) * 10.0
+        else:
+            Omega = np.asarray(information, dtype=float)
+            if Omega.shape != (6, 6):
+                raise ValueError(f"information must be 6×6, got {Omega.shape}.")
+
+        # Build SE(3) transform from (ΔR, Δp).
+        T_imu = np.eye(4)
+        T_imu[:3, :3] = preint_result.delta_rotation
+        T_imu[:3, 3] = preint_result.delta_position
+
+        self.add_edge(from_id=from_id, to_id=to_id, transform=T_imu, information=Omega)
+
+        factor = ImuFactor(
+            from_id=from_id,
+            to_id=to_id,
+            preint_result=preint_result,
+            information=Omega,
+        )
+        self._imu_factors.append(factor)
+        return factor
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -441,6 +546,11 @@ class PoseGraph:
     def edges(self) -> List[PoseGraphEdge]:
         """List of all :class:`PoseGraphEdge` objects in the graph."""
         return list(self._edges)
+
+    @property
+    def imu_factors(self) -> List[ImuFactor]:
+        """List of all :class:`ImuFactor` objects added via :meth:`add_imu_factor`."""
+        return list(self._imu_factors)
 
     def __len__(self) -> int:
         """Number of nodes in the graph."""
