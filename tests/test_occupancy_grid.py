@@ -420,3 +420,155 @@ class TestIntegration:
         assert grid[5, 9] == 100
         # Free cells along some rays (e.g. col=3, row=5) should be free.
         assert grid[5, 3] == 0
+
+
+# ---------------------------------------------------------------------------
+# SparseOccupancyGrid
+# ---------------------------------------------------------------------------
+
+from sensor_transposition.occupancy_grid import SparseOccupancyGrid  # noqa: E402
+
+
+def _make_sparse_grid(
+    resolution: float = 0.5,
+    width: int = 20,
+    height: int = 20,
+    origin: np.ndarray = None,
+) -> SparseOccupancyGrid:
+    if origin is None:
+        origin = np.array([-5.0, -5.0])
+    return SparseOccupancyGrid(resolution=resolution, width=width, height=height, origin=origin)
+
+
+class TestSparseOccupancyGridInit:
+    def test_default_grid_all_unknown(self):
+        g = _make_sparse_grid()
+        grid = g.get_grid()
+        assert grid.shape == (20, 20)
+        assert np.all(grid == -1)
+
+    def test_shape_matches_params(self):
+        g = SparseOccupancyGrid(resolution=0.1, width=30, height=40)
+        assert g.get_grid().shape == (40, 30)
+
+    def test_zero_resolution_raises(self):
+        with pytest.raises(ValueError, match="resolution"):
+            SparseOccupancyGrid(resolution=0.0, width=10, height=10)
+
+    def test_zero_width_raises(self):
+        with pytest.raises(ValueError, match="width"):
+            SparseOccupancyGrid(resolution=1.0, width=0, height=10)
+
+    def test_zero_height_raises(self):
+        with pytest.raises(ValueError, match="height"):
+            SparseOccupancyGrid(resolution=1.0, width=10, height=0)
+
+    def test_origin_wrong_shape_raises(self):
+        with pytest.raises(ValueError, match="origin"):
+            SparseOccupancyGrid(resolution=1.0, width=10, height=10, origin=np.zeros(3))
+
+    def test_invalid_log_odds_bounds_raises(self):
+        with pytest.raises(ValueError, match="log_odds_min"):
+            SparseOccupancyGrid(
+                resolution=1.0, width=5, height=5,
+                log_odds_min=5.0, log_odds_max=5.0
+            )
+
+    def test_properties(self):
+        g = SparseOccupancyGrid(resolution=0.25, width=8, height=12)
+        assert g.resolution == 0.25
+        assert g.width == 8
+        assert g.height == 12
+
+
+class TestSparseOccupancyGridInsert:
+    def test_hit_cell_becomes_occupied(self):
+        g = SparseOccupancyGrid(resolution=1.0, width=10, height=10, origin=np.zeros(2))
+        pts = np.array([[5.5, 5.5, 0.0]])
+        T = np.eye(4)
+        sensor_origin = np.array([0.5, 0.5, 0.0])
+        g.insert_scan(pts, T, sensor_origin=sensor_origin)
+        grid = g.get_grid()
+        assert grid[5, 5] == 100
+
+    def test_ray_cells_become_free(self):
+        g = SparseOccupancyGrid(resolution=1.0, width=20, height=10, origin=np.zeros(2))
+        pts = np.array([[9.5, 5.0, 0.0]])
+        T = np.eye(4)
+        sensor_origin = np.array([0.5, 5.0, 0.0])
+        g.insert_scan(pts, T, sensor_origin=sensor_origin)
+        grid = g.get_grid()
+        assert grid[5, 9] == 100
+        assert grid[5, 3] == 0
+
+    def test_out_of_z_range_points_ignored(self):
+        g = SparseOccupancyGrid(resolution=1.0, width=10, height=10, z_min=0.0, z_max=2.0)
+        pts = np.array([[5.5, 5.5, 5.0]])
+        T = np.eye(4)
+        g.insert_scan(pts, T)
+        assert np.all(g.get_grid() == -1)
+
+    def test_invalid_points_raises(self):
+        g = _make_sparse_grid()
+        with pytest.raises(ValueError):
+            g.insert_scan(np.zeros((3, 2)), np.eye(4))
+
+    def test_invalid_transform_raises(self):
+        g = _make_sparse_grid()
+        with pytest.raises(ValueError):
+            g.insert_scan(np.zeros((3, 3)), np.eye(3))
+
+
+class TestSparseOccupancyGridMethods:
+    def test_clear_resets_all_cells(self):
+        g = SparseOccupancyGrid(resolution=1.0, width=10, height=10, origin=np.zeros(2))
+        pts = np.array([[5.5, 5.5, 0.0]])
+        g.insert_scan(pts, np.eye(4))
+        g.clear()
+        assert np.all(g.get_grid() == -1)
+        assert len(g._cells) == 0
+
+    def test_to_probability_unobserved_is_0_5(self):
+        g = _make_sparse_grid()
+        prob = g.to_probability()
+        assert prob.shape == (20, 20)
+        np.testing.assert_allclose(prob, 0.5)
+
+    def test_to_probability_occupied_above_0_5(self):
+        g = SparseOccupancyGrid(resolution=1.0, width=10, height=10, origin=np.zeros(2))
+        pts = np.array([[5.5, 5.5, 0.0]])
+        sensor_origin = np.array([0.5, 0.5, 0.0])
+        for _ in range(10):
+            g.insert_scan(pts, np.eye(4), sensor_origin=sensor_origin)
+        prob = g.to_probability()
+        assert prob[5, 5] > 0.5
+
+    def test_world_to_cell_matches_origin(self):
+        g = SparseOccupancyGrid(resolution=1.0, width=10, height=10, origin=np.zeros(2))
+        col, row = g.world_to_cell(0.5, 0.5)
+        assert col == 0
+        assert row == 0
+
+    def test_cell_to_world_returns_centre(self):
+        g = SparseOccupancyGrid(resolution=1.0, width=10, height=10, origin=np.zeros(2))
+        x, y = g.cell_to_world(2, 3)
+        assert x == pytest.approx(2.5)
+        assert y == pytest.approx(3.5)
+
+    def test_to_ros_int8_same_as_get_grid(self):
+        g = SparseOccupancyGrid(resolution=1.0, width=10, height=10, origin=np.zeros(2))
+        pts = np.array([[5.5, 5.5, 0.0]])
+        g.insert_scan(pts, np.eye(4))
+        np.testing.assert_array_equal(g.to_ros_int8(), g.get_grid())
+
+    def test_sparse_matches_dense_single_scan(self):
+        """SparseOccupancyGrid and OccupancyGrid should produce identical grids."""
+        origin = np.array([-5.0, -5.0])
+        dense = OccupancyGrid(resolution=1.0, width=10, height=10, origin=origin)
+        sparse = SparseOccupancyGrid(resolution=1.0, width=10, height=10, origin=origin)
+        pts = np.array([[2.5, 2.5, 0.0]])
+        sensor_origin = np.array([-4.5, -4.5, 0.0])
+        T = np.eye(4)
+        dense.insert_scan(pts, T, sensor_origin=sensor_origin)
+        sparse.insert_scan(pts, T, sensor_origin=sensor_origin)
+        np.testing.assert_array_equal(dense.get_grid(), sparse.get_grid())

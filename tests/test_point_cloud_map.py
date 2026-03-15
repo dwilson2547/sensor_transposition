@@ -626,3 +626,131 @@ class TestSavePly:
                 PointCloudMap.from_ply(path)
         finally:
             os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# filter_dynamic_points
+# ---------------------------------------------------------------------------
+
+from sensor_transposition.point_cloud_map import (  # noqa: E402
+    filter_dynamic_points,
+    consistency_filter,
+)
+
+
+class TestFilterDynamicPoints:
+    def test_all_static_with_zero_velocity(self):
+        cloud = np.array([[1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [3.0, 0.0, 0.0]])
+        velocity = np.zeros(3)
+        mask = filter_dynamic_points(cloud, velocity, doppler_threshold=0.5)
+        assert np.all(mask)
+
+    def test_dynamic_points_filtered_out(self):
+        cloud = np.zeros((5, 3))
+        velocity = np.array([0.1, 0.4, 0.6, 0.9, 1.5])
+        mask = filter_dynamic_points(cloud, velocity, doppler_threshold=0.5)
+        # |v| <= 0.5 → static; |v| > 0.5 → dynamic
+        expected = np.array([True, True, False, False, False])
+        np.testing.assert_array_equal(mask, expected)
+
+    def test_negative_velocities_handled(self):
+        cloud = np.zeros((3, 3))
+        velocity = np.array([-1.0, -0.3, 0.4])
+        mask = filter_dynamic_points(cloud, velocity, doppler_threshold=0.5)
+        expected = np.array([False, True, True])
+        np.testing.assert_array_equal(mask, expected)
+
+    def test_all_dynamic(self):
+        cloud = np.zeros((4, 3))
+        velocity = np.array([1.0, 2.0, -1.5, -3.0])
+        mask = filter_dynamic_points(cloud, velocity, doppler_threshold=0.5)
+        assert not np.any(mask)
+
+    def test_zero_threshold(self):
+        cloud = np.zeros((3, 3))
+        velocity = np.array([0.0, 0.0, 0.1])
+        mask = filter_dynamic_points(cloud, velocity, doppler_threshold=0.0)
+        expected = np.array([True, True, False])
+        np.testing.assert_array_equal(mask, expected)
+
+    def test_wrong_cloud_shape_raises(self):
+        with pytest.raises(ValueError, match="cloud"):
+            filter_dynamic_points(np.zeros((3, 2)), np.zeros(3))
+
+    def test_velocity_length_mismatch_raises(self):
+        with pytest.raises(ValueError, match="velocity_map"):
+            filter_dynamic_points(np.zeros((3, 3)), np.zeros(5))
+
+    def test_negative_threshold_raises(self):
+        with pytest.raises(ValueError, match="doppler_threshold"):
+            filter_dynamic_points(np.zeros((3, 3)), np.zeros(3), doppler_threshold=-0.1)
+
+    def test_returns_bool_array(self):
+        cloud = np.zeros((3, 3))
+        velocity = np.array([0.1, 0.6, 0.3])
+        mask = filter_dynamic_points(cloud, velocity)
+        assert mask.dtype == bool
+
+
+# ---------------------------------------------------------------------------
+# consistency_filter
+# ---------------------------------------------------------------------------
+
+
+class TestConsistencyFilter:
+    def test_all_consistent_identical_clouds(self):
+        cloud = np.array([[1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [3.0, 0.0, 0.0]])
+        mask = consistency_filter(cloud, cloud, threshold_m=0.1)
+        assert np.all(mask)
+
+    def test_no_support_far_reference(self):
+        cloud = np.array([[1.0, 0.0, 0.0]])
+        reference = np.array([[100.0, 0.0, 0.0]])
+        mask = consistency_filter(cloud, reference, threshold_m=0.5)
+        assert not np.any(mask)
+
+    def test_threshold_controls_support(self):
+        cloud = np.array([[0.0, 0.0, 0.0]])
+        reference = np.array([[0.4, 0.0, 0.0]])
+        # distance = 0.4 m
+        assert consistency_filter(cloud, reference, threshold_m=0.5)[0]
+        assert not consistency_filter(cloud, reference, threshold_m=0.3)[0]
+
+    def test_mixed_support(self):
+        cloud = np.array([
+            [0.0, 0.0, 0.0],  # close to reference
+            [50.0, 0.0, 0.0],  # far from reference
+        ])
+        reference = np.array([[0.1, 0.0, 0.0]])
+        mask = consistency_filter(cloud, reference, threshold_m=1.0)
+        assert mask[0]
+        assert not mask[1]
+
+    def test_empty_reference_all_false(self):
+        cloud = np.array([[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
+        reference = np.empty((0, 3))
+        mask = consistency_filter(cloud, reference, threshold_m=0.5)
+        assert not np.any(mask)
+
+    def test_wrong_cloud_shape_raises(self):
+        with pytest.raises(ValueError, match="cloud"):
+            consistency_filter(np.zeros((3, 2)), np.zeros((3, 3)))
+
+    def test_wrong_reference_shape_raises(self):
+        with pytest.raises(ValueError, match="reference_cloud"):
+            consistency_filter(np.zeros((3, 3)), np.zeros((3, 2)))
+
+    def test_zero_threshold_raises(self):
+        with pytest.raises(ValueError, match="threshold_m"):
+            consistency_filter(np.zeros((3, 3)), np.zeros((3, 3)), threshold_m=0.0)
+
+    def test_negative_threshold_raises(self):
+        with pytest.raises(ValueError, match="threshold_m"):
+            consistency_filter(np.zeros((3, 3)), np.zeros((3, 3)), threshold_m=-1.0)
+
+    def test_returns_bool_array(self):
+        cloud = np.zeros((5, 3))
+        reference = np.zeros((5, 3))
+        mask = consistency_filter(cloud, reference)
+        assert mask.dtype == bool
+        assert mask.shape == (5,)

@@ -304,14 +304,14 @@ No filtering mechanism currently exists — neither a simple velocity-based
 filter using radar Doppler measurements nor a consistency-check between
 overlapping scans.
 
-- [ ] Add a `filter_dynamic_points(cloud, velocity_map, ...)` utility to
+- [x] Add a `filter_dynamic_points(cloud, velocity_map, ...)` utility to
   `point_cloud_map.py` that removes points whose Doppler velocity (from a
   co-registered radar scan) exceeds a threshold.
-- [ ] Add a `consistency_filter(cloud, reference_cloud, threshold_m=0.5)` that
+- [x] Add a `consistency_filter(cloud, reference_cloud, threshold_m=0.5)` that
   removes points in `cloud` that are not supported by any point within
   `threshold_m` in `reference_cloud` — a simple but effective way to remove
   transient objects when two scans of the same area are available.
-- [ ] Document both filters in `docs/point_cloud_map.md`.
+- [x] Document both filters in `docs/point_cloud_map.md`.
 
 ---
 
@@ -325,12 +325,12 @@ whether a region has been observed.  For large outdoor environments (e.g. a
 city block) the memory usage becomes prohibitive before any sensor data is
 processed.
 
-- [ ] Add a `SparseOccupancyGrid` class (or extend `OccupancyGrid`) that stores
+- [x] Add a `SparseOccupancyGrid` class (or extend `OccupancyGrid`) that stores
   only observed voxels in a Python `dict` keyed by voxel index, identical
   external API.
-- [ ] Add a `SparseTSDFVolume` (or extend `TSDFVolume`) with the same approach:
+- [x] Add a `SparseTSDFVolume` (or extend `TSDFVolume`) with the same approach:
   hash map over occupied voxels, lazy allocation on first integration.
-- [ ] Benchmark memory usage of sparse vs. dense representations in the
+- [x] Benchmark memory usage of sparse vs. dense representations in the
   docstring.
 
 ---
@@ -366,9 +366,9 @@ processed.
       to ICP
 
 ### Low Priority
-- [ ] Add dynamic-object filtering utilities to `point_cloud_map.py` (Doppler
+- [x] Add dynamic-object filtering utilities to `point_cloud_map.py` (Doppler
       filter + consistency filter)
-- [ ] Add sparse (hash-map based) variants of `OccupancyGrid` and `TSDFVolume`
+- [x] Add sparse (hash-map based) variants of `OccupancyGrid` and `TSDFVolume`
       for large-scale outdoor environments
 - [ ] Add `on_outage` sensor-health monitoring hooks to `SLAMSession` for
       detecting IMU, LiDAR, and GPS dropouts
