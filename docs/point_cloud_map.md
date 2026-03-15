@@ -164,6 +164,94 @@ print(f"Loaded {len(map_ply):,} points from PLY.")
 
 ---
 
+## Dynamic Object Filtering
+
+Moving objects (pedestrians, vehicles, cyclists) that appear in multiple
+consecutive scans leave "ghost" trails in the accumulated map that degrade
+localisation accuracy.  `sensor_transposition.point_cloud_map` provides
+two complementary filters to remove transient points before they enter the
+map.
+
+### Doppler Velocity Filter – `filter_dynamic_points`
+
+When a co-registered radar or Doppler-LiDAR scan is available, each point
+carries a **radial velocity** measurement.  Points whose absolute Doppler
+speed exceeds a threshold are classified as dynamic and should be excluded.
+
+```python
+from sensor_transposition.point_cloud_map import filter_dynamic_points
+
+# doppler_velocities is an (N,) array of signed radial speeds (m/s)
+# from a co-registered radar or Doppler LiDAR scan.
+static_mask = filter_dynamic_points(
+    lidar_cloud,          # (N, 3) XYZ
+    doppler_velocities,   # (N,)  m/s
+    doppler_threshold=0.5,
+)
+
+static_cloud = lidar_cloud[static_mask]
+pcd_map.add_scan(static_cloud, ego_to_world)
+```
+
+> **Rule of thumb:** 0.5 m/s is a good starting threshold for urban driving.
+> Lower the threshold in pedestrian-heavy environments; raise it on
+> high-speed roads where even stationary objects may appear to move due to
+> ego-motion estimation error.
+
+### Consistency Filter – `consistency_filter`
+
+When no Doppler data is available, transient objects can be detected by
+checking that each point in one scan has support from a *reference* scan
+of the same area (e.g. a second traversal or an adjacent keyframe).
+Points that are not supported within `threshold_m` are assumed to belong
+to transient obstacles.
+
+```python
+from sensor_transposition.point_cloud_map import consistency_filter
+
+# scan_a: current scan to be added to the map.
+# scan_b: a trusted reference scan of the same region.
+static_mask = consistency_filter(
+    scan_a,
+    scan_b,
+    threshold_m=0.5,   # metres
+)
+
+static_points = scan_a[static_mask]
+pcd_map.add_scan(static_points, ego_to_world)
+```
+
+> **Note:** The consistency filter requires two overlapping views of the
+> same region.  For long trajectories, the reference scan can be drawn from
+> the global map's local neighbourhood around the current pose.
+
+### Combined workflow
+
+Both filters can be applied in sequence:
+
+```python
+from sensor_transposition.point_cloud_map import (
+    filter_dynamic_points,
+    consistency_filter,
+    PointCloudMap,
+)
+
+pcd_map = PointCloudMap()
+
+for lidar_cloud, doppler_v, reference_cloud, ego_to_world in data_stream:
+    # 1. Remove Doppler-detected dynamic points.
+    static1 = filter_dynamic_points(lidar_cloud, doppler_v, 0.5)
+    cloud1 = lidar_cloud[static1]
+
+    # 2. Remove consistency-check failures against the previous keyframe.
+    static2 = consistency_filter(cloud1, reference_cloud, 0.5)
+    cloud2 = cloud1[static2]
+
+    pcd_map.add_scan(cloud2, ego_to_world)
+```
+
+---
+
 ## API Reference
 
 ### `PointCloudMap`
@@ -180,6 +268,13 @@ print(f"Loaded {len(map_ply):,} points from PLY.")
 | `from_ply(path)` *(classmethod)* | Load a map from an ASCII PLY file. |
 | `clear()` | Remove all accumulated points and colours. |
 | `__len__()` | Number of points currently stored. |
+
+### Dynamic filtering utilities
+
+| Function | Description |
+|---|---|
+| `filter_dynamic_points(cloud, velocity_map, doppler_threshold=0.5)` | Return a boolean mask keeping only static points (those with `|velocity| ≤ doppler_threshold`). |
+| `consistency_filter(cloud, reference_cloud, threshold_m=0.5)` | Return a boolean mask keeping only points in *cloud* that have at least one neighbour within `threshold_m` in *reference_cloud*. |
 
 ---
 

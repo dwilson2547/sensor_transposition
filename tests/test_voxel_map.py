@@ -430,3 +430,164 @@ class TestReturnsCopies:
         weights = v.get_weights()
         weights[:] = 999.0
         assert v.get_weights().max() < 999.0
+
+
+# ---------------------------------------------------------------------------
+# SparseTSDFVolume
+# ---------------------------------------------------------------------------
+
+from sensor_transposition.voxel_map import SparseTSDFVolume  # noqa: E402
+
+
+def _make_sparse_volume(voxel_size: float = 0.5) -> SparseTSDFVolume:
+    return SparseTSDFVolume(
+        voxel_size=voxel_size,
+        origin=np.array([-5.0, -5.0, -5.0]),
+        dims=(20, 20, 20),
+    )
+
+
+class TestSparseTSDFVolumeInit:
+    def test_default_origin(self):
+        v = SparseTSDFVolume(voxel_size=0.1, dims=(10, 10, 10))
+        np.testing.assert_array_equal(v.origin, [0.0, 0.0, 0.0])
+
+    def test_zero_voxel_size_raises(self):
+        with pytest.raises(ValueError, match="voxel_size"):
+            SparseTSDFVolume(voxel_size=0.0, dims=(10, 10, 10))
+
+    def test_zero_dim_raises(self):
+        with pytest.raises(ValueError, match="dims"):
+            SparseTSDFVolume(voxel_size=0.1, dims=(0, 10, 10))
+
+    def test_bad_origin_shape_raises(self):
+        with pytest.raises(ValueError, match="origin"):
+            SparseTSDFVolume(voxel_size=0.1, dims=(10, 10, 10), origin=np.zeros(2))
+
+    def test_zero_truncation_raises(self):
+        with pytest.raises(ValueError, match="truncation"):
+            SparseTSDFVolume(voxel_size=0.1, dims=(10, 10, 10), truncation=0.0)
+
+    def test_default_truncation(self):
+        v = SparseTSDFVolume(voxel_size=0.2, dims=(10, 10, 10))
+        assert v.truncation == pytest.approx(0.6)
+
+    def test_dims_property(self):
+        v = SparseTSDFVolume(voxel_size=0.1, dims=(5, 6, 7))
+        assert v.dims == (5, 6, 7)
+
+    def test_empty_volume_tsdf_all_nan(self):
+        v = _make_sparse_volume()
+        tsdf = v.get_tsdf()
+        assert tsdf.shape == (20, 20, 20)
+        assert np.all(np.isnan(tsdf))
+
+    def test_empty_volume_weights_all_zero(self):
+        v = _make_sparse_volume()
+        weights = v.get_weights()
+        assert weights.shape == (20, 20, 20)
+        assert np.all(weights == 0.0)
+
+
+class TestSparseTSDFVolumeIntegrate:
+    def test_integrate_updates_voxels(self):
+        v = _make_sparse_volume()
+        v.integrate(np.array([[-3.0, 0.0, 0.0]]), _translation_tf(tx=3.0))
+        tsdf = v.get_tsdf()
+        assert np.any(~np.isnan(tsdf))
+
+    def test_weights_nonzero_after_integrate(self):
+        v = _make_sparse_volume()
+        v.integrate(np.array([[-3.0, 0.0, 0.0]]), _translation_tf(tx=3.0))
+        assert np.any(v.get_weights() > 0)
+
+    def test_invalid_points_raises(self):
+        v = _make_sparse_volume()
+        with pytest.raises(ValueError):
+            v.integrate(np.zeros((3, 2)), np.eye(4))
+
+    def test_invalid_transform_raises(self):
+        v = _make_sparse_volume()
+        with pytest.raises(ValueError):
+            v.integrate(np.zeros((3, 3)), np.eye(3))
+
+
+class TestSparseTSDFVolumeSurface:
+    def test_extract_surface_no_observations_returns_empty(self):
+        v = _make_sparse_volume()
+        pts = v.extract_surface_points()
+        assert pts.shape == (0, 3)
+
+    def test_extract_surface_returns_near_zero_crossing(self):
+        v = _make_sparse_volume()
+        v.integrate(np.array([[-3.0, 0.0, 0.0]]), _translation_tf(tx=3.0))
+        pts = v.extract_surface_points(threshold=0.3)
+        assert pts.shape[1] == 3
+
+    def test_threshold_out_of_range_raises(self):
+        v = _make_sparse_volume()
+        with pytest.raises(ValueError, match="threshold"):
+            v.extract_surface_points(threshold=1.5)
+
+    def test_threshold_negative_raises(self):
+        v = _make_sparse_volume()
+        with pytest.raises(ValueError, match="threshold"):
+            v.extract_surface_points(threshold=-0.1)
+
+
+class TestSparseTSDFVolumeCoordConversion:
+    def test_voxel_to_world(self):
+        v = SparseTSDFVolume(voxel_size=1.0, origin=np.zeros(3), dims=(10, 10, 10))
+        x, y, z = v.voxel_to_world(0, 0, 0)
+        assert x == pytest.approx(0.5)
+        assert y == pytest.approx(0.5)
+        assert z == pytest.approx(0.5)
+
+    def test_world_to_voxel(self):
+        v = SparseTSDFVolume(voxel_size=1.0, origin=np.zeros(3), dims=(10, 10, 10))
+        fx, fy, fz = v.world_to_voxel(1.5, 2.5, 3.5)
+        assert fx == pytest.approx(1.5)
+        assert fy == pytest.approx(2.5)
+        assert fz == pytest.approx(3.5)
+
+
+class TestSparseTSDFVolumeClear:
+    def test_clear_empties_voxels(self):
+        v = _make_sparse_volume()
+        v.integrate(np.array([[-3.0, 0.0, 0.0]]), _translation_tf(tx=3.0))
+        v.clear()
+        assert len(v._voxels) == 0
+        assert np.all(np.isnan(v.get_tsdf()))
+        assert np.all(v.get_weights() == 0.0)
+
+    def test_can_integrate_after_clear(self):
+        v = _make_sparse_volume()
+        v.integrate(np.array([[-3.0, 0.0, 0.0]]), _translation_tf(tx=3.0))
+        v.clear()
+        v.integrate(np.array([[-3.0, 0.0, 0.0]]), _translation_tf(tx=3.0))
+        assert np.any(~np.isnan(v.get_tsdf()))
+
+
+class TestSparseTSDFVolumeMatchesDense:
+    def test_tsdf_values_match_dense_volume(self):
+        """SparseTSDFVolume should produce the same TSDF as TSDFVolume."""
+        origin = np.array([-5.0, -5.0, -5.0])
+        voxel_size = 0.5
+        dims = (20, 20, 20)
+        pts = np.array([[-3.0, 0.0, 0.0]])
+        T = _translation_tf(tx=3.0)
+
+        dense = TSDFVolume(voxel_size=voxel_size, origin=origin, dims=dims)
+        sparse = SparseTSDFVolume(voxel_size=voxel_size, origin=origin, dims=dims)
+        dense.integrate(pts, T)
+        sparse.integrate(pts, T)
+
+        dense_tsdf = dense.get_tsdf()
+        sparse_tsdf = sparse.get_tsdf()
+
+        # Observed voxels should match.
+        observed = ~np.isnan(dense_tsdf)
+        np.testing.assert_array_equal(np.isnan(sparse_tsdf), ~observed)
+        np.testing.assert_allclose(
+            sparse_tsdf[observed], dense_tsdf[observed], atol=1e-10
+        )

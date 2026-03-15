@@ -43,6 +43,7 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
   - [Occupancy Grid](#occupancy-grid)
   - [Voxel Map (TSDF)](#voxel-map-tsdf)
   - [Point-Cloud Map](#point-cloud-map)
+    - [Dynamic Object Filtering](#dynamic-object-filtering)
   - [Visualisation](#visualisation)
   - [Bag Recorder / Player](#bag-recorder--player)
   - [Camera–LiDAR Extrinsic Calibration](#cameralidar-extrinsic-calibration)
@@ -84,9 +85,9 @@ A Python toolkit for multi-sensor calibration, data parsing, and coordinate-fram
 - **Pose graph** – pose graph data structure and Gauss-Newton optimisation back-end for graph-SLAM; supports standard 6-DOF odometry and loop-closure edges plus :class:`ImuFactor` edges that wrap IMU pre-integration results for tightly-coupled IMU–LiDAR optimisation.
 - **Sliding-window smoother** – fixed-lag online SLAM smoother that bounds per-step cost to O(window_size³).
 - **Submap manager** – keyframe selection and submap division for large-scale long-duration SLAM.
-- **Occupancy grid** – 2-D probabilistic occupancy grid with log-odds ray-casting; exports to ROS `nav_msgs/OccupancyGrid` int8 format.
-- **Voxel map (TSDF)** – Truncated Signed-Distance Function volumetric map for dense 3-D reconstruction.
-- **Point-cloud map** – accumulated coloured point-cloud map with voxel-grid downsampling and PCD / PLY I/O.
+- **Occupancy grid** – 2-D probabilistic occupancy grid with log-odds ray-casting; exports to ROS `nav_msgs/OccupancyGrid` int8 format.  `SparseOccupancyGrid` stores only observed cells in a hash map, reducing memory by up to 14× for large outdoor environments.
+- **Voxel map (TSDF)** – Truncated Signed-Distance Function volumetric map for dense 3-D reconstruction.  `SparseTSDFVolume` stores only observed voxels, reducing memory by up to 64× for large outdoor volumes.
+- **Point-cloud map** – accumulated coloured point-cloud map with voxel-grid downsampling, PCD / PLY I/O, and dynamic-object filtering: `filter_dynamic_points` (Doppler velocity threshold) and `consistency_filter` (cross-scan support check) remove moving-object "ghost" trails from the map.
 - **Visualisation** – BEV rendering, trajectory overlay, LiDAR-on-image overlay, Open3D and RViz export helpers.
 - **Bag recorder / player** – lightweight multi-topic binary bag format (`.sbag`) with streaming write and indexed playback; no external dependencies.  `sbag_to_rosbag()` converts to MCAP for use with `ros2 bag` (requires `pip install ".[mcap]"`).
 - **SLAM session** – `SLAMSession` orchestration class that wires ICP odometry, Scan Context loop closure, pose-graph optimisation, and point-cloud map accumulation into a single object with sensible defaults and per-topic callbacks.  Supports scan-to-local-submap odometry via `use_local_map=True` to reduce frame-to-frame drift.  A `LocalMap` helper class maintains a downsampled sliding window of the last N keyframe scans.  Pass `imu_topic` to automatically accumulate IMU measurements between keyframes, pre-integrate them, and add an :class:`ImuFactor` edge to the pose graph for tightly-coupled IMU–LiDAR optimisation.
@@ -1365,16 +1366,32 @@ print(f"Created {len(submaps)} submaps.")
 ### Occupancy Grid
 
 2-D probabilistic occupancy grid built from LiDAR scans using log-odds
-ray-casting.
+ray-casting.  Two implementations are provided:
+
+* **`OccupancyGrid`** – dense ``(height × width)`` NumPy array; constant
+  memory allocation; best for small-to-medium environments.
+* **`SparseOccupancyGrid`** – identical API but stores only observed cells
+  in a Python ``dict``; no up-front memory allocation; best for large
+  outdoor environments where most of the grid is never visited.  For a
+  1 km × 1 km grid at 1 m resolution, a 1 % observation density yields a
+  ~14× memory reduction.
 
 ```python
-from sensor_transposition.occupancy_grid import OccupancyGrid
+from sensor_transposition.occupancy_grid import OccupancyGrid, SparseOccupancyGrid
 import numpy as np
 
+# Dense variant (small environments):
 grid = OccupancyGrid(
     resolution=0.10,                    # 10 cm/cell
     width=200, height=200,              # 20 m × 20 m
     origin=np.array([-10.0, -10.0]),    # world coords of cell (0, 0)
+)
+
+# Sparse variant (large outdoor environments — drop-in replacement):
+grid = SparseOccupancyGrid(
+    resolution=0.10,
+    width=10000, height=10000,          # 1 km × 1 km — no memory reserved
+    origin=np.array([-500.0, -500.0]),
 )
 
 for frame_pose, lidar_scan in zip(trajectory, scans):
@@ -1400,16 +1417,33 @@ ros_msg_data = ros_grid.ravel()      # flat int8 array for nav_msgs/OccupancyGri
 ### Voxel Map (TSDF)
 
 Truncated Signed-Distance Function (TSDF) volumetric map for dense 3-D
-reconstruction.
+reconstruction.  Two implementations are provided:
+
+* **`TSDFVolume`** – dense ``(nx × ny × nz)`` NumPy arrays; constant
+  memory allocation; best for bounded indoor scenes.
+* **`SparseTSDFVolume`** – identical API but stores only voxels that have
+  received at least one observation in a Python ``dict``; no up-front
+  memory; best for large outdoor volumes where the vast majority of voxels
+  are never near a surface.  For a ``200 × 200 × 50`` voxel volume with
+  5 000 surface voxels updated, memory drops from ~32 MB to ~500 KB — a
+  ~64× reduction.
 
 ```python
 import numpy as np
-from sensor_transposition.voxel_map import TSDFVolume
+from sensor_transposition.voxel_map import TSDFVolume, SparseTSDFVolume
 
+# Dense variant (bounded indoor scenes):
 volume = TSDFVolume(
     voxel_size=0.10,
     origin=np.array([-10.0, -10.0, -0.5]),
     dims=(200, 200, 50),   # 200×200×50 voxels
+)
+
+# Sparse variant (large outdoor volumes — drop-in replacement):
+volume = SparseTSDFVolume(
+    voxel_size=0.10,
+    origin=np.array([-500.0, -500.0, -2.0]),
+    dims=(10000, 10000, 50),   # no memory reserved up front
 )
 
 for frame_pose, lidar_scan in zip(trajectory, scans):
@@ -1425,7 +1459,9 @@ weight_array = volume.get_weights()  # (nx, ny, nz) float64
 ### Point-Cloud Map
 
 Accumulated coloured point-cloud map assembled from successive LiDAR scans,
-with voxel-grid downsampling and PCD / PLY file I/O.
+with voxel-grid downsampling, PCD / PLY file I/O, and dynamic-object
+filtering utilities.  See [`docs/point_cloud_map.md`](docs/point_cloud_map.md)
+for the full guide.
 
 ```python
 from sensor_transposition.point_cloud_map import PointCloudMap
@@ -1445,6 +1481,26 @@ world_colors = pcd_map.get_colors()   # (N, 3) uint8, or None
 pcd_map.save_pcd("map.pcd")
 pcd_map.save_ply("map.ply")
 loaded = PointCloudMap.from_pcd("map.pcd")
+```
+
+#### Dynamic Object Filtering
+
+Moving objects leave "ghost" trails in an accumulated map.  Two filters are
+provided to remove dynamic points before they enter the map:
+
+```python
+from sensor_transposition.point_cloud_map import (
+    filter_dynamic_points,
+    consistency_filter,
+)
+
+# Remove points whose Doppler speed exceeds 0.5 m/s (requires co-registered radar).
+static_mask = filter_dynamic_points(lidar_cloud, doppler_velocities, doppler_threshold=0.5)
+
+# Remove points with no support within 0.5 m in a reference scan.
+static_mask = consistency_filter(current_scan, reference_scan, threshold_m=0.5)
+
+pcd_map.add_scan(lidar_cloud[static_mask], ego_to_world)
 ```
 
 ---

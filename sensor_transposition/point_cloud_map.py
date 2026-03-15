@@ -65,9 +65,10 @@ colour each scan before accumulation::
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 
 # ---------------------------------------------------------------------------
@@ -552,6 +553,144 @@ class PointCloudMap:
         if self._points is None:
             return 0
         return len(self._points)
+
+
+# ---------------------------------------------------------------------------
+# Dynamic object filtering utilities
+# ---------------------------------------------------------------------------
+
+
+def filter_dynamic_points(
+    cloud: np.ndarray,
+    velocity_map: np.ndarray,
+    doppler_threshold: float = 0.5,
+) -> np.ndarray:
+    """Return a boolean mask identifying **static** points using Doppler velocity.
+
+    Points from a co-registered radar (or Doppler LiDAR) scan carry a
+    radial velocity for each point.  Points whose absolute Doppler speed
+    exceeds *doppler_threshold* are classified as belonging to a moving
+    object (pedestrian, vehicle, etc.) and should be excluded from the
+    map to prevent "ghost" trails.
+
+    Args:
+        cloud: ``(N, 3)`` float array of XYZ point positions (metres).
+        velocity_map: ``(N,)`` float array of signed Doppler (radial)
+            velocities for each point in *cloud* (m/s).  Positive values
+            indicate motion away from the sensor; negative values indicate
+            motion towards the sensor.
+        doppler_threshold: Points with ``|velocity| > doppler_threshold``
+            are classified as dynamic and receive a ``False`` mask entry.
+            Defaults to ``0.5`` m/s.
+
+    Returns:
+        ``(N,)`` boolean array – ``True`` for static points, ``False``
+        for dynamic points.
+
+    Raises:
+        ValueError: If *cloud* is not ``(N, 3)``, *velocity_map* is not
+            ``(N,)``, or *doppler_threshold* is negative.
+
+    Example::
+
+        from sensor_transposition.point_cloud_map import (
+            PointCloudMap,
+            filter_dynamic_points,
+        )
+
+        # cloud and doppler_velocities come from a co-registered radar scan.
+        static_mask = filter_dynamic_points(cloud, doppler_velocities, 0.5)
+        static_cloud = cloud[static_mask]
+
+        pcd_map = PointCloudMap()
+        pcd_map.add_scan(static_cloud, ego_to_world)
+    """
+    cloud = np.asarray(cloud, dtype=float)
+    velocity_map = np.asarray(velocity_map, dtype=float)
+
+    if cloud.ndim != 2 or cloud.shape[1] != 3:
+        raise ValueError(
+            f"cloud must be an (N, 3) array, got shape {cloud.shape}."
+        )
+    if velocity_map.ndim != 1 or velocity_map.shape[0] != cloud.shape[0]:
+        raise ValueError(
+            f"velocity_map must be a 1-D array of length {cloud.shape[0]}, "
+            f"got shape {velocity_map.shape}."
+        )
+    if doppler_threshold < 0.0:
+        raise ValueError(
+            f"doppler_threshold must be >= 0, got {doppler_threshold}."
+        )
+
+    return np.abs(velocity_map) <= doppler_threshold
+
+
+def consistency_filter(
+    cloud: np.ndarray,
+    reference_cloud: np.ndarray,
+    threshold_m: float = 0.5,
+) -> np.ndarray:
+    """Return a boolean mask keeping only points supported by a reference cloud.
+
+    A point in *cloud* is **consistent** if at least one point in
+    *reference_cloud* lies within *threshold_m* metres of it.  Points
+    that have no nearby support in the reference are assumed to belong to
+    transient objects (dynamic obstacles observed in only one scan) and
+    receive a ``False`` mask entry.
+
+    This is a simple but effective way to remove transient objects when two
+    scans of the same area are available (e.g. a second pass over the same
+    region, or two nearby keyframes with overlapping views).
+
+    Args:
+        cloud: ``(N, 3)`` float array of XYZ point positions to be
+            filtered (metres).
+        reference_cloud: ``(M, 3)`` float array of XYZ reference points
+            (metres).  This is the *trusted* scan used to validate points
+            in *cloud*.
+        threshold_m: Maximum distance (metres) at which a point in *cloud*
+            is considered supported by *reference_cloud*.  Defaults to
+            ``0.5`` m.
+
+    Returns:
+        ``(N,)`` boolean array – ``True`` for consistent (supported)
+        points, ``False`` for points with no nearby reference support.
+
+    Raises:
+        ValueError: If *cloud* or *reference_cloud* is not ``(N, 3)``, or
+            *threshold_m* is not strictly positive.
+
+    Example::
+
+        from sensor_transposition.point_cloud_map import consistency_filter
+
+        # Two overlapping scans of the same region.  Transient objects
+        # (e.g. a pedestrian present only in scan_a) are removed.
+        static_mask = consistency_filter(scan_a, scan_b, threshold_m=0.5)
+        static_points = scan_a[static_mask]
+    """
+    cloud = np.asarray(cloud, dtype=float)
+    reference_cloud = np.asarray(reference_cloud, dtype=float)
+
+    if cloud.ndim != 2 or cloud.shape[1] != 3:
+        raise ValueError(
+            f"cloud must be an (N, 3) array, got shape {cloud.shape}."
+        )
+    if reference_cloud.ndim != 2 or reference_cloud.shape[1] != 3:
+        raise ValueError(
+            f"reference_cloud must be an (N, 3) array, got shape {reference_cloud.shape}."
+        )
+    if threshold_m <= 0.0:
+        raise ValueError(
+            f"threshold_m must be > 0, got {threshold_m}."
+        )
+
+    if len(reference_cloud) == 0:
+        return np.zeros(len(cloud), dtype=bool)
+
+    tree = cKDTree(reference_cloud)
+    distances, _ = tree.query(cloud, k=1, workers=-1)
+    return distances <= threshold_m
 
 
 # ---------------------------------------------------------------------------

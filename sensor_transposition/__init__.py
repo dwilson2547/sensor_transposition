@@ -33,6 +33,12 @@ from sensor_transposition import wheel_odometry
 from sensor_transposition import sliding_window
 from sensor_transposition import occupancy_grid
 from sensor_transposition import voxel_map
+from sensor_transposition.occupancy_grid import SparseOccupancyGrid
+from sensor_transposition.voxel_map import SparseTSDFVolume
+from sensor_transposition.point_cloud_map import (
+    filter_dynamic_points,
+    consistency_filter,
+)
 from sensor_transposition import submap_manager
 from sensor_transposition import slam_session
 from sensor_transposition.slam_session import SLAMSession, LocalMap, LocalizationSession, merge_sessions
@@ -104,6 +110,10 @@ __all__ = [
     "sliding_window",
     "occupancy_grid",
     "voxel_map",
+    "SparseOccupancyGrid",
+    "SparseTSDFVolume",
+    "filter_dynamic_points",
+    "consistency_filter",
     "submap_manager",
     "slam_session",
     "SLAMSession",
