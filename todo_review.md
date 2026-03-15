@@ -281,13 +281,13 @@ robots often need to:
 
 Neither workflow is currently possible.
 
-- [ ] Add `SLAMSession.save(path)` and `SLAMSession.load(path)` methods that
+- [x] Add `SLAMSession.save(path)` and `SLAMSession.load(path)` methods that
   serialise and deserialise the pose graph, trajectory, Scan Context database,
   and point-cloud map together (e.g. as a ZIP archive containing PCD, YAML,
   and a binary pose-graph file).
-- [ ] Add a `merge_sessions(session_a, session_b, loop_edge)` utility function
+- [x] Add a `merge_sessions(session_a, session_b, loop_edge)` utility function
   that merges two sessions given a known inter-session loop-closure edge.
-- [ ] Document in the README under a new **Multi-Session and Map Merging**
+- [x] Document in the README under a new **Multi-Session and Map Merging**
   section.
 
 ---
@@ -357,7 +357,7 @@ processed.
 - [x] Add visual loop closure support (`compute_image_descriptor`,
       `ImageLoopClosureDatabase`) to `loop_closure.py`
 - [x] Add stereo camera utilities (rectification, disparity, triangulation)
-- [ ] Add multi-session SLAM: `SLAMSession.save()` / `load()` and
+- [x] Add multi-session SLAM: `SLAMSession.save()` / `load()` and
       `merge_sessions()` utility
 - [x] Add RTK GPS setup guide (`docs/rtk_gps_setup.md`) and RTCM 3.x parser
 - [x] Add GNSS outage handling to `GpsFuser` (`max_fix_age_sec`, `on_outage`
