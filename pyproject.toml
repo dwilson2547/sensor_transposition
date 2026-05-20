@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sensor_transposition"
+name = "dwilson-sensor_transposition"
 version = "0.1.0"
 description = "Suite of tools for sensor transposition and camera intrinsic/extrinsic calibration"
 readme = "README.md"
